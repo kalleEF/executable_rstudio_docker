@@ -7,7 +7,7 @@
  Usage (uncompiled .ps1):
   - Open PowerShell console (not by double-clicking)
   - cd to script folder
-  - Run: `PowerShell -ExecutionPolicy Bypass -File .\access-rstudio-gui.ps1 -STA`
+  - Run: `PowerShell -ExecutionPolicy Bypass -File .\access_rstudio_gui.ps1 -STA`
 
  To make it double-clickable:
  1. Install ps2exe (if needed):
@@ -23,12 +23,12 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 # === Configuration ===
-$remoteHost   = "youruser@remote-server.edu"   # SSH user@host
+$remoteHosts   = @("localhost", "php_workstation@XXX.XX.XX.XX") # SSH user@host
 $rstudioImages = @("rstudio-impact", "rocker/rstudio") # List your images here
 
 # Build the form
 $form = New-Object System.Windows.Forms.Form -Property @{ 
-    Text = 'Remote Access - IMPACT NCD Germany'; Size = New-Object System.Drawing.Size(400,240); StartPosition = 'CenterScreen' }
+    Text = 'Remote Access - IMPACT NCD Germany'; Size = New-Object System.Drawing.Size(400,260); StartPosition = 'CenterScreen' }
 
 # Username label and textbox
 $labelUser = New-Object System.Windows.Forms.Label -Property @{ Text='Username:'; Location=New-Object System.Drawing.Point(10,20); Size=New-Object System.Drawing.Size(100,20) }
@@ -50,8 +50,16 @@ $comboImage.Items.AddRange($rstudioImages)
 $comboImage.SelectedIndex = 0
 $form.Controls.Add($comboImage)
 
+# Host label and combobox
+$labelHost = New-Object System.Windows.Forms.Label -Property @{ Text='Host:'; Location=New-Object System.Drawing.Point(10,140); Size=New-Object System.Drawing.Size(100,20) }
+$form.Controls.Add($labelHost)
+$comboHost = New-Object System.Windows.Forms.ComboBox -Property @{ Location=New-Object System.Drawing.Point(120,140); Size=New-Object System.Drawing.Size(250,20); DropDownStyle = 'DropDownList' }
+$comboHost.Items.AddRange($remoteHosts)
+$comboHost.SelectedIndex = 0
+$form.Controls.Add($comboHost)
+
 # Launch button (move down)
-$button = New-Object System.Windows.Forms.Button -Property @{ Text='Launch RStudio'; Location=New-Object System.Drawing.Point(120,140); Size=New-Object System.Drawing.Size(120,30) }
+$button = New-Object System.Windows.Forms.Button -Property @{ Text='Launch Container'; Location=New-Object System.Drawing.Point(120,180); Size=New-Object System.Drawing.Size(120,30) }
 $form.Controls.Add($button)
 
 # Button click event handler
@@ -68,22 +76,98 @@ $button.Add_Click({
     }
     $container = "rstudio-$student"
     $rstudioImage = $comboImage.SelectedItem
+    $remoteHost = $comboHost.SelectedItem
 
     # Escape password for shell
     $escapedPass = $password -replace "'", "'\\''"
 
     # Build remote SSH script
-    $remoteScript = @"
-if ! docker ps -a --format '{{.Names}}' | grep -qx \"$container\"; then
-  docker run -d --name $container -e PASSWORD=\"$escapedPass\" -p 0:8787 $rstudioImage > /dev/null
-else
-  docker start $container > /dev/null
-fi
-# report host port
-docker port $container 8787 | sed 's/.*://'
-"@
+    if ($remoteHost -eq 'localhost') {
+        # Ensure to use local context
+        docker context use desktop-linux | Out-Null
+        Write-Host "Using local Docker context 'desktop-linux'."
+        # For local testing, use a direct script block
+        $dockerScript = @'
+# Check if container exists
+$containerExists = docker container inspect $container
+if ($LASTEXITCODE -eq 1) {
+    docker run -d --name $container -e PASSWORD=$escapedPass -p 0:8787 $rstudioImage | Out-Null
+} else {
+    docker start $container | Out-Null
+}
+# Wait for the container to be running
+$tryCount = 0
+while ((docker inspect -f '{{.State.Running}}' $container) -ne 'true' -and $tryCount -lt 10) {
+    Start-Sleep -Seconds 1
+    $tryCount++
+}
+# Get mapped port for 8787
+$portInfo = docker port $container 8787
+if (-not $portInfo) {
+    Write-Error 'ERROR: Failed to determine mapped port for RStudio container.'
+    exit 1
+}
+$port = ($portInfo -split ':')[-1].Trim()
+if (-not $port -or -not ($port -match '^\d+$')) {
+    Write-Error 'ERROR: Failed to determine mapped port for RStudio container.'
+    exit 1
+}
+Write-Output $port
+'@
+    } else {
+    # If on remote host, check, create, or use Docker context
 
-    # Test SSH connection with visual indicator
+    # Check if context exists
+    $dockerContexts = docker context ls
+    $targetContext = "remote-workstation"
+    if ($dockerContexts -match "^\s*${targetContext}(\s|\*)") {
+        Write-Host "Context '$targetContext' is available."
+        $remoteContextExists = $true
+    } else {
+        Write-Host "Context '$targetContext' is NOT available."
+        $remoteContextExists = $false
+    }
+    if ($remoteContextExists -eq $true) {
+        # Use the remote context if it exists
+        docker context use $targetContext | Out-Null
+        Write-Host "Using existing context '$targetContext'."
+    } else { # Create the remote context if it doesn't exist
+        docker context create $targetContext --docker "host=ssh://$remoteHost" | Out-Null
+        docker context use $targetContext | Out-Null
+        Write-Host "Created and switched to context '$targetContext'."
+    }
+
+    $dockerScript = @'  
+# Check if container exists
+$containerExists = docker container inspect $container
+if ($LASTEXITCODE -eq 1) {
+    docker run -d --name $container -e PASSWORD=$escapedPass -p 0:8787 $rstudioImage | Out-Null
+} else {
+    docker start $container | Out-Null
+}
+# Wait for the container to be running
+$tryCount = 0
+while ((docker inspect -f '{{.State.Running}}' $container) -ne 'true' -and $tryCount -lt 10) {
+    Start-Sleep -Seconds 1
+    $tryCount++
+}
+# Get mapped port for 8787
+$portInfo = docker port $container 8787
+if (-not $portInfo) {
+    Write-Error 'ERROR: Failed to determine mapped port for RStudio container.'
+    exit 1
+}
+$port = ($portInfo -split ':')[-1].Trim()
+if (-not $port -or -not ($port -match '^\d+$')) {
+    Write-Error 'ERROR: Failed to determine mapped port for RStudio container.'
+    exit 1
+}
+Write-Output $port
+'@
+       }
+    
+   # Test SSH connection with visual indicator
+   if ($remoteHost -ne "localhost") {
     try {
         $form.Enabled = $false
         $oldCursor = $form.Cursor
@@ -115,10 +199,19 @@ docker port $container 8787 | sed 's/.*://'
         [System.Windows.Forms.MessageBox]::Show("Unexpected error during SSH connection test.`n$($_.Exception.Message)", 'Error','OK','Error')
         return
     }
-
+   } 
+   
     # Connect to remote host and run the script
     try {
-        $sshOutput = ssh $remoteHost $remoteScript 2>&1
+        if ($remoteHost -eq 'localhost') {
+            # For local testing, run the script directly
+            $sshOutput = Invoke-Expression $dockerScript 2>&1
+            Write-Host "-> Running locally!"
+        } else {
+            # For deployment, encode the script for SSH
+            $sshOutput = Invoke-Expression $dockerScript 2>&1
+            Write-Host "-> Running remotely over SSH using a Docker context at $remoteHost`n"
+        }
         # Ensure $sshOutput is a string
         if ($sshOutput -isnot [string]) {
             $sshOutput = $sshOutput | Out-String
@@ -127,8 +220,14 @@ docker port $container 8787 | sed 's/.*://'
         if (-not $port -or $port -notmatch '^\d+$') {
             throw "Failed to get port from remote. SSH output:`n$sshOutput"
         }
-        $hostIP = $remoteHost.Split('@')[1]
-        [System.Windows.Forms.MessageBox]::Show("RStudio is ready!`nURL: http://$hostIP`:$port`nUsername: rstudio`nPassword: $password", 'Success','OK','Information')
+        if ($remoteHost -eq 'localhost') {
+            [System.Windows.Forms.MessageBox]::Show("RStudio is ready!`nURL: http://$remoteHost`:$port`nUsername: rstudio`nPassword: $password", 'Success','OK','Information')
+            Write-Host "-> RStudio is ready!`n-> Connect via URL: http://$remoteHost`:$port`n-> Username: rstudio`n-> Password: $password"
+        } else {
+            $hostIP = $remoteHost.Split('@')[1]
+            [System.Windows.Forms.MessageBox]::Show("RStudio is ready!`nURL: http://$hostIP`:$port`nUsername: rstudio`nPassword: $password", 'Success','OK','Information')
+            Write-Host "-> RStudio is ready!`n-> Connect via URL: http://$hostIP`:$port`n-> Username: rstudio`n-> Password: $password"
+        }
     } catch {
         [System.Windows.Forms.MessageBox]::Show("Error launching container:`n$($_.Exception.Message)", 'Error','OK','Error')
     }
