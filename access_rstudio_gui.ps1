@@ -15,6 +15,15 @@
  2. Compile to exe:
       Invoke-PS2EXE -InputFile .\access-rstudio-gui.ps1 -OutputFile .\access-rstudio-gui.exe
  3. Double-click the resulting `access-rstudio-gui.exe` to launch the GUI.
+
+
+TODOs:
+ - Add logic to mount specific model folder that contains folders with a GitHub repo of a model if on remote host
+ - Add logic to stop container locally and on remote host
+ - Correctly setup user and group IDs to enable Git in the container
+ - Add Information message that changes need to be pushed to the GitHub repo through RStudio in the browser
+ - Ensure the script works both locally and on remote hosts
+
 #>
 
 # Ensure Windows Forms app environment
@@ -91,7 +100,14 @@ $button.Add_Click({
 # Check if container exists
 $containerExists = docker container inspect $container
 if ($LASTEXITCODE -eq 1) {
-    docker run -d --name $container -e PASSWORD=$escapedPass -p 0:8787 $rstudioImage | Out-Null
+    docker run -d `
+    --name $container `
+    -e PASSWORD=$escapedPass `
+    -e USERID=1000 `
+    -e GROUPID=1000 `
+    -p 0:8787 `
+    -v "C:\Users\ge28bak\OneDrive - TUM\TUM_Personal\1_Research\Publications\2021_Diet_simulation_modeling_Germany\Model\IMPACT-NCD-Germany:/home/rstudio/IMPACT" `
+    $rstudioImage | Out-Null
 } else {
     docker start $container | Out-Null
 }
