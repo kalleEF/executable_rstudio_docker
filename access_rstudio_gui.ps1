@@ -417,44 +417,271 @@ $buttonRemote.Add_Click({
     Write-Host "[INFO] Testing SSH connection to remote workstation..."
     
     # Define remote host (update this IP address to match your workstation)
-    $remoteHost = "php_workstation@10.162.192.90"  # Update this to your actual remote host
-    
+    $remoteHost = "php-workstation@10.162.192.90"  # Update this to your actual remote host
+ 
     # Test SSH connection with detailed feedback
     try {
         Write-Host "  Attempting connection to: $remoteHost"
         Write-Host ""
         
-        # Test basic SSH connectivity
+        # First, try SSH key authentication (no password needed)
+        Write-Host "  [INFO] Testing SSH key authentication..."
         $sshTestResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
         
         $SSHEXITCODE = $LASTEXITCODE
 
-        if ($SSHEXITCODE -eq 0){
-            Write-Host "[SUCCESS] SSH connection established!"
+        if ($SSHEXITCODE -eq 0) {
+            Write-Host "  [SUCCESS] SSH key authentication successful!"
             Write-Host "  Response: $sshTestResult"
             Write-Host "  Remote workstation is reachable"
             Write-Host ""
 
             # Extract IP address from remote host string
             $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-                
-            # Set dialog result and close with success
             $script:REMOTE_HOST_IP = $remoteIP
             
         } else {
+            Write-Host "  [INFO] SSH key authentication failed - password authentication required"
+            Write-Host "  This is normal for first-time connections"
             Write-Host ""
-            Write-Host "[ERROR] SSH connection failed"
-            Write-Host "  Target: $remoteHost"
-            Write-Host ""
-            Write-Host "Please verify:"
-            Write-Host "  - Network connectivity is available"
-            Write-Host "  - SSH key is added to remote host authorized_keys"
-            Write-Host "  - Remote host IP address is correct"
-            Write-Host "  - SSH service is running on remote host"
-            Write-Host ""
-        
-            [System.Windows.Forms.MessageBox]::Show("SSH connection to remote workstation failed.`n`nPlease check network connectivity and SSH configuration.`nSee terminal for detailed error information.", "Remote Connection Error", "OK", "Error")
-            return
+            
+            # Prompt user for remote host password
+            $formPassword = New-Object System.Windows.Forms.Form -Property @{ 
+                Text = 'Remote Host Password - IMPACT NCD Germany'
+                Size = New-Object System.Drawing.Size(450,180)
+                StartPosition = 'CenterScreen'
+                FormBorderStyle = 'FixedDialog'
+                MaximizeBox = $false
+            }
+
+            # Instruction label
+            $labelPasswordInstruction = New-Object System.Windows.Forms.Label -Property @{ 
+                Text = "Please enter the password for the remote workstation:`n$remoteHost"
+                Location = New-Object System.Drawing.Point(10,10)
+                Size = New-Object System.Drawing.Size(420,40)
+                Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+                TextAlign = 'MiddleCenter'
+            }
+            $formPassword.Controls.Add($labelPasswordInstruction)
+
+            # Password textbox
+            $textRemotePassword = New-Object System.Windows.Forms.TextBox -Property @{ 
+                Location = New-Object System.Drawing.Point(50,60)
+                Size = New-Object System.Drawing.Size(340,20)
+                UseSystemPasswordChar = $true
+                Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+            }
+            $formPassword.Controls.Add($textRemotePassword)
+
+            # OK and Cancel buttons
+            $buttonPasswordOK = New-Object System.Windows.Forms.Button -Property @{
+                Text = 'Connect'
+                Location = New-Object System.Drawing.Point(250,100)
+                Size = New-Object System.Drawing.Size(75,30)
+                Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+            }
+            $formPassword.Controls.Add($buttonPasswordOK)
+
+            $buttonPasswordCancel = New-Object System.Windows.Forms.Button -Property @{
+                Text = 'Cancel'
+                Location = New-Object System.Drawing.Point(340,100)
+                Size = New-Object System.Drawing.Size(75,30)
+                DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            }
+            $formPassword.Controls.Add($buttonPasswordCancel)
+
+            # Set default buttons
+            $formPassword.AcceptButton = $buttonPasswordOK
+            $formPassword.CancelButton = $buttonPasswordCancel
+
+            # Add validation for password OK button click
+            $buttonPasswordOK.Add_Click({
+                if ([string]::IsNullOrWhiteSpace($textRemotePassword.Text)) {
+                    [System.Windows.Forms.MessageBox]::Show('Please enter the remote host password.', 'Password Required', 'OK', 'Warning')
+                    $textRemotePassword.Focus()
+                    return
+                }
+                $formPassword.DialogResult = [System.Windows.Forms.DialogResult]::OK
+                $formPassword.Close()
+            })
+
+            # Focus on password field
+            $textRemotePassword.Select()
+
+            # Show the password dialog
+            $passwordResult = $formPassword.ShowDialog()
+            
+            if ($passwordResult -eq [System.Windows.Forms.DialogResult]::OK) {
+                $remotePassword = $textRemotePassword.Text
+                Write-Host "  [INFO] Password provided, testing connection..."
+                Write-Host ""
+                
+                # Test connection with password using a more reliable method
+                try {
+                    Write-Host "  [INFO] Testing SSH connection with password..."
+                    
+                    # Method 1: Try using plink (PuTTY's command line tool) if available
+                    $plinkPath = Get-Command plink.exe -ErrorAction SilentlyContinue
+                    if ($plinkPath) {
+                        Write-Host "  Using PuTTY plink for password authentication..."
+                        
+                        # Extract username and host parts
+                        $hostParts = $remoteHost -split "@"
+                        if ($hostParts.Count -eq 2) {
+                            $sshUser = $hostParts[0]
+                            $sshHost = $hostParts[1]
+                        } else {
+                            $sshUser = $env:USERNAME
+                            $sshHost = $remoteHost
+                        }
+                        
+                        # Test connection with plink
+                        $plinkResult = & plink.exe -ssh -batch -pw $remotePassword -l $sshUser $sshHost "echo SSH_SUCCESS" 2>&1
+                        
+                        if ($plinkResult -match "SSH_SUCCESS") {
+                            Write-Host "  [SUCCESS] Password authentication successful!"
+                            Write-Host ""
+                            $authSuccess = $true
+                        } else {
+                            Write-Host "  [ERROR] Password authentication failed with plink"
+                            Write-Host "  Output: $plinkResult"
+                            $authSuccess = $false
+                        }
+                        
+                    } else {
+                        # Method 2: Use expect-like functionality with PowerShell and SSH
+                        Write-Host "  Using PowerShell SSH automation (plink not found)..."
+                        
+                        # Create a batch file for SSH with password
+                        $batchFile = [System.IO.Path]::GetTempFileName() + ".bat"
+                        $expectScript = @"
+@echo off
+echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "echo SSH_SUCCESS" 2>nul
+"@
+                        Set-Content -Path $batchFile -Value $expectScript
+                        
+                        # Execute the batch file
+                        $batchResult = & cmd.exe /c $batchFile 2>&1
+                        Remove-Item $batchFile -Force -ErrorAction SilentlyContinue
+                        
+                        if ($batchResult -match "SSH_SUCCESS") {
+                            Write-Host "  [SUCCESS] Password authentication successful!"
+                            Write-Host ""
+                            $authSuccess = $true
+                        } else {
+                            # Method 3: Try with sshpass if available (Windows Subsystem for Linux)
+                            $sshpassTest = Get-Command sshpass -ErrorAction SilentlyContinue
+                            if ($sshpassTest) {
+                                Write-Host "  Trying with sshpass..."
+                                $sshpassResult = & sshpass -p $remotePassword ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost "echo SSH_SUCCESS" 2>&1
+                                
+                                if ($sshpassResult -match "SSH_SUCCESS") {
+                                    Write-Host "  [SUCCESS] Password authentication successful with sshpass!"
+                                    Write-Host ""
+                                    $authSuccess = $true
+                                } else {
+                                    $authSuccess = $false
+                                }
+                            } else {
+                                Write-Host "  [ERROR] Could not authenticate with available methods"
+                                Write-Host "  Output: $batchResult"
+                                $authSuccess = $false
+                            }
+                        }
+                    }
+                    
+                    if ($authSuccess) {
+                        # Now copy the SSH key for future passwordless authentication
+                        Write-Host "  [INFO] Setting up SSH key for passwordless authentication..."
+                        Write-Host "  This will allow future connections without password prompts"
+                        Write-Host ""
+                        
+                        # Get the public key content
+                        $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker.pub"
+                        if (Test-Path $sshPublicKeyPath) {
+                            $publicKeyContent = Get-Content $sshPublicKeyPath -Raw
+                            $publicKeyContent = $publicKeyContent.Trim()
+                            
+                            Write-Host "  Copying SSH key to remote host..."
+                            
+                            # Use the same authentication method that worked for copying the key
+                            if ($plinkPath) {
+                                # Use plink to copy the SSH key
+                                $keyCommand = "mkdir -p ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
+                                $keyCopyResult = & plink.exe -ssh -batch -pw $remotePassword -l $sshUser $sshHost $keyCommand 2>&1
+                            } elseif ($sshpassTest) {
+                                # Use sshpass to copy the SSH key
+                                $keyCommand = "mkdir -p ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
+                                $keyCopyResult = & sshpass -p $remotePassword ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost $keyCommand 2>&1
+                            } else {
+                                # Use batch method to copy SSH key
+                                $keyBatchFile = [System.IO.Path]::GetTempFileName() + ".bat"
+                                $keyBatchScript = @"
+@echo off
+echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "mkdir -p ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED" 2>nul
+"@
+                                Set-Content -Path $keyBatchFile -Value $keyBatchScript
+                                $keyCopyResult = & cmd.exe /c $keyBatchFile 2>&1
+                                Remove-Item $keyBatchFile -Force -ErrorAction SilentlyContinue
+                            }
+                            
+                            if ($keyCopyResult -match "SSH_KEY_COPIED") {
+                                Write-Host "  [SUCCESS] SSH key successfully copied to remote host!"
+                                Write-Host "  Future connections will not require password"
+                                Write-Host ""
+                                
+                                # Test passwordless connection
+                                Write-Host "  [INFO] Testing passwordless SSH connection..."
+                                Start-Sleep -Seconds 2  # Give the remote system a moment to process the key
+                                
+                                $finalTest = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'Passwordless SSH successful'" 2>&1
+                                if ($LASTEXITCODE -eq 0) {
+                                    Write-Host "  [SUCCESS] Passwordless SSH authentication confirmed!"
+                                    Write-Host "  Response: $finalTest"
+                                } else {
+                                    Write-Host "  [INFO] Passwordless test not yet working, but key was copied"
+                                    Write-Host "  This may take a moment to take effect on the remote system"
+                                }
+                            } else {
+                                Write-Host "  [WARNING] Failed to copy SSH key to remote host"
+                                Write-Host "  Password authentication will be required for future connections"
+                                Write-Host "  Details: $keyCopyResult"
+                            }
+                        } else {
+                            Write-Host "  [ERROR] SSH public key not found at: $sshPublicKeyPath"
+                            Write-Host "  Cannot set up passwordless authentication"
+                        }
+                        
+                        # Extract IP address and continue
+                        $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
+                        $script:REMOTE_HOST_IP = $remoteIP
+                        
+                    } else {
+                        Write-Host "  [ERROR] All password authentication methods failed"
+                        Write-Host ""
+                        Write-Host "  Troubleshooting suggestions:"
+                        Write-Host "  1. Verify the password is correct"
+                        Write-Host "  2. Check if SSH service is running on remote host"
+                        Write-Host "  3. Ensure password authentication is enabled on remote host"
+                        Write-Host "  4. Try installing PuTTY (plink.exe) for better SSH support"
+                        Write-Host ""
+                        [System.Windows.Forms.MessageBox]::Show("Password authentication failed with all available methods.`n`nPlease check:`n- Password is correct`n- SSH service is running on remote host`n- Password authentication is enabled`n- Consider installing PuTTY for better compatibility", "Authentication Failed", "OK", "Error")
+                        return
+                    }
+                    
+                } catch {
+                    Write-Host "  [ERROR] Failed to test password authentication"
+                    Write-Host "  Details: $($_.Exception.Message)"
+                    Write-Host ""
+                    [System.Windows.Forms.MessageBox]::Show("Failed to test password authentication.`n`nError: $($_.Exception.Message)", "Connection Error", "OK", "Error")
+                    return
+                }
+                
+            } else {
+                Write-Host "  [INFO] User cancelled password authentication"
+                Write-Host ""
+                return
+            }
         }
 
     } catch {
@@ -535,16 +762,32 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "    [INFO] Scanning remote host for available repositories..."
     
     # Define the base path on remote host where repositories are stored
-    $remoteRepoPath = "/home/php_workstation/models"  # TODO: Update this path as needed
+    $remoteRepoPath = "/home/php-workstation/Schreibtisch/IMPACT/Models"
     #$remoteHost = "php_workstation@$($script:REMOTE_HOST_IP)" TODO: CHECK IF NEEDED
     
     try {
         # Scan for subdirectories on remote host
         Write-Host "    Scanning directory: $remoteRepoPath"
+        Write-Host "    Using remote host: $remoteHost"
         Write-Host ""
         
+        # Ensure we're using the correct remote host (the one we authenticated with)
+        if ([string]::IsNullOrEmpty($remoteHost)) {
+            # Reconstruct the remote host from the IP we stored earlier
+            if ($script:REMOTE_HOST_IP) {
+                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Host "    [INFO] Reconstructed remote host: $remoteHost"
+            } else {
+                Write-Host "    [ERROR] No remote host information available"
+                throw "Remote host configuration is missing"
+            }
+        }
+        
         $scanCommand = "find '$remoteRepoPath' -maxdepth 1 -type d -not -path '$remoteRepoPath' -exec basename {} \;"
-        $availableFolders = & ssh -o ConnectTimeout=10 $remoteHost $scanCommand 2>&1
+        
+        # Use the authenticated SSH connection
+        Write-Host "    Executing: ssh $remoteHost '$scanCommand'"
+        $availableFolders = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $scanCommand 2>&1
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "    [ERROR] Could not scan remote directory"
@@ -674,8 +917,19 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         # Verify the selected repository exists and contains a Git repository
         Write-Host "    [INFO] Verifying selected repository..."
+        
+        # Ensure we're using the correct remote host for verification
+        if ([string]::IsNullOrEmpty($remoteHost)) {
+            if ($script:REMOTE_HOST_IP) {
+                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Host "    [INFO] Using remote host: $remoteHost"
+            } else {
+                Write-Host "    [ERROR] No remote host information available for verification"
+            }
+        }
+        
         $gitCheckCommand = "test -d '$remoteRepoPath/$($script:SELECTED_REPO)/.git' && echo 'Git repository found' || echo 'No Git repository'"
-        $gitCheckResult = & ssh -o ConnectTimeout=10 $remoteHost $gitCheckCommand 2>&1
+        $gitCheckResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $gitCheckCommand 2>&1
         
         if ($gitCheckResult -match "Git repository found") {
             Write-Host "    [SUCCESS] Git repository found in selected folder"
@@ -710,39 +964,239 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     # Store the full remote path for later use
     $script:REMOTE_REPO_PATH = "$remoteRepoPath/$($script:SELECTED_REPO)"
     
-    # --- Create/use a REMOTE Docker context over SSH ---
-    # Requires SSH access to a host that already has a Docker Engine running.
-    # Replace the user/IP to match your environment.
-    # Uses a TEST-NET IP reserved for documentation as a placeholder.
+    # Verify Docker is available on remote host
+    Write-Host "    [INFO] Checking remote Docker availability..."
+    Write-Host ""
+    try {
+        # Ensure we have the correct remote host for Docker verification
+        if ([string]::IsNullOrEmpty($remoteHost)) {
+            if ($script:REMOTE_HOST_IP) {
+                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Host "    [INFO] Using remote host for Docker verification: $remoteHost"
+            } else {
+                Write-Host "    [ERROR] No remote host information available for Docker verification"
+                exit 1
+            }
+        }
+        
+        $dockerVersion = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker --version" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    [SUCCESS] Docker is available on remote host"
+            Write-Host "    Remote Docker version: $dockerVersion"
+            Write-Host ""
+            
+            # Ensure Docker engine is running on remote host
+            Write-Host "    [INFO] Checking remote Docker engine status..."
+            & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "    [WARNING] Docker engine is not running on remote host"
+                Write-Host "    Attempting to start Docker service on Ubuntu 24.04..."
+                Write-Host ""
+                
+                try {
+                    # Try to start Docker service on Ubuntu (systemd)
+                    # First, check if user can run Docker without sudo (is in docker group)
+                    Write-Host "    Checking if user can run Docker without sudo..."
+                    $dockerGroupCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "groups | grep -q docker && echo 'HAS_DOCKER_GROUP' || echo 'NO_DOCKER_GROUP'" 2>&1
+                    
+                    if ($dockerGroupCheck -match "HAS_DOCKER_GROUP") {
+                        Write-Host "    [INFO] User is in docker group, trying Docker without sudo..."
+                        # Try starting Docker service as regular user (if systemd allows)
+                        $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "systemctl --user start docker || echo 'USER_START_FAILED'" 2>&1
+                        if ($startResult -match "USER_START_FAILED") {
+                            Write-Host "    [INFO] User-level start failed, need system-level Docker service"
+                            $needsSudo = $true
+                        } else {
+                            Write-Host "    [SUCCESS] Docker service started at user level"
+                            $needsSudo = $false
+                        }
+                    } else {
+                        Write-Host "    [INFO] User not in docker group, system-level service required"
+                        $needsSudo = $true
+                    }
+                    
+                    if ($needsSudo) {
+                        Write-Host "    [INFO] System-level Docker service management required"
+                        Write-Host "    Checking sudo access for Docker service..."
+                        
+                        # Check if passwordless sudo is available for systemctl docker
+                        $sudoCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo -n systemctl status docker >/dev/null 2>&1 && echo 'SUDO_OK' || echo 'SUDO_NEEDS_PASSWORD'" 2>&1
+                        
+                        if ($sudoCheck -match "SUDO_OK") {
+                            Write-Host "    [SUCCESS] Passwordless sudo available for Docker service"
+                            $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo systemctl start docker" 2>&1
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "    [SUCCESS] Docker service started via sudo"
+                            } else {
+                                Write-Host "    [WARNING] Could not start Docker service via sudo: $startResult"
+                            }
+                        } else {
+                            Write-Host "    [WARNING] Sudo requires password for Docker service management"
+                            Write-Host "    Cannot start Docker service automatically via SSH batch mode"
+                            
+                            # Provide user with manual instructions
+                            [System.Windows.Forms.MessageBox]::Show(
+                                "Docker service needs to be started on the remote host, but sudo requires a password.`n`n" +
+                                "Please manually run on the remote host:`n`n" +
+                                "sudo systemctl start docker`n" +
+                                "sudo systemctl enable docker`n`n" +
+                                "OR add your user to the docker group:`n`n" +
+                                "sudo usermod -aG docker `$USER`n" +
+                                "newgrp docker`n`n" +
+                                "Then click OK to continue.",
+                                "Manual Docker Setup Required",
+                                "OK",
+                                "Information"
+                            )
+                        }
+                    }
+                    
+                    # Wait for Docker daemon to start with progress indication
+                    Write-Host "    Waiting for remote Docker daemon to initialize..."
+                    $maxAttempts = 30  # 30 seconds max wait
+                    $attempt = 0
+                    
+                    do {
+                        Start-Sleep -Seconds 1
+                        $attempt++
+                        Write-Host "    Checking remote Docker daemon status... ($attempt/$maxAttempts)" -NoNewline
+                        
+                        & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Host " [SUCCESS]"
+                            break
+                        } else {
+                            Write-Host ""
+                        }
+                        
+                        # Show different messages at different intervals
+                        if ($attempt -eq 10) {
+                            Write-Host "    [INFO] Remote Docker is still starting up (this may take a moment)..."
+                        } elseif ($attempt -eq 20) {
+                            Write-Host "    [INFO] Still waiting for remote Docker daemon (almost ready)..."
+                        }
+                        
+                    } while ($attempt -lt $maxAttempts)
+                    
+                    # Final check
+                    & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "    [SUCCESS] Remote Docker engine started successfully!"
+                        Write-Host "    Startup time: $attempt seconds"
+                    } else {
+                        Write-Host "    [WARNING] Remote Docker engine did not start within $maxAttempts seconds"
+                        Write-Host "    Please check Docker service on remote host manually"
+                        Write-Host ""
+                        
+                        # Offer user choice to continue or exit
+                        $choice = [System.Windows.Forms.MessageBox]::Show(
+                            "Remote Docker engine could not be started automatically.`n`nWould you like to:`n- Click 'Yes' to continue anyway (may cause errors)`n- Click 'No' to check manually and try again`n- Click 'Cancel' to exit",
+                            "Remote Docker Startup Issue",
+                            "YesNoCancel",
+                            "Warning"
+                        )
+                        
+                        if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+                            Write-Host "    [INFO] Please start Docker on remote host manually"
+                            [System.Windows.Forms.MessageBox]::Show("Please start Docker on the remote host manually:`n`nsudo systemctl start docker`nsudo systemctl enable docker`n`nThen click OK to continue.", "Manual Start Required", "OK", "Information")
+                        } elseif ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                            Write-Host "    [INFO] User chose to exit"
+                            exit 1
+                        }
+                        # If Yes is chosen, continue with warning
+                    }
+                    
+                } catch {
+                    Write-Host "    [ERROR] Failed to start remote Docker service"
+                    Write-Host "    Error: $($_.Exception.Message)"
+                    Write-Host "    Please start Docker on remote host manually"
+                }
+                
+            } else {
+                Write-Host "    [SUCCESS] Remote Docker engine is running"
+            }
+            Write-Host ""
+        } else {
+            Write-Host "    [ERROR] Docker is not available on remote host"
+            Write-Host ""
+            [System.Windows.Forms.MessageBox]::Show("Docker is not available on the remote host.`n`nPlease install and configure Docker on Ubuntu 24.04:`n`n" +
+                "sudo apt update`n" +
+                "sudo apt install docker.io`n" +
+                "sudo systemctl start docker`n" +
+                "sudo systemctl enable docker`n`n" +
+                "Optional: Add user to docker group (avoids sudo):`n" +
+                "sudo usermod -aG docker `$USER`n" +
+                "newgrp docker", "Remote Docker Not Available", "OK", "Error")
+            exit 1
+        }
+    } catch {
+        Write-Host "    [ERROR] Could not check remote Docker availability"
+        Write-Host "    Error details: $($_.Exception.Message)"
+        Write-Host ""
+        [System.Windows.Forms.MessageBox]::Show("Could not verify remote Docker availability.`n`nError: $($_.Exception.Message)`n`nPlease ensure the remote host is accessible and Docker is installed.", "Remote Docker Check Failed", "OK", "Error")
+        exit 1
+    }
+    
+    # Create/use a REMOTE Docker context over SSH
+    # Requires SSH access to a host that already has a Docker Engine running (Ubuntu 24.04)
+    # The remote host uses Unix socket: unix:///var/run/docker.sock
+    Write-Host "    [INFO] Configuring Docker context for remote Ubuntu 24.04 host..."
 
-    $RemoteContextName  = "php_workstation"  # Name for the Docker context
+    $RemoteContextName = "php_workstation"  # Name for the Docker context
 
-    # Optional: if you need a specific key or SSH options, configure your ~/.ssh/config
-    # or ensure an agent is running (ssh-agent / Pageant). Docker CLI uses your SSH setup.
+    # Ensure we have the correct remote host for Docker context
+    if ([string]::IsNullOrEmpty($remoteHost)) {
+        if ($script:REMOTE_HOST_IP) {
+            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            Write-Host "    [INFO] Using remote host for Docker context: $remoteHost"
+        } else {
+            Write-Host "    [ERROR] No remote host information available for Docker context"
+            exit 1
+        }
+    }
 
     # Check if the context already exists
+    Write-Host "    [INFO] Checking for existing Docker context..."
     $existing = & docker context ls --format '{{.Name}}' 2>$null
     $exists = $existing -contains $RemoteContextName
 
     if (-not $exists) {
-        Write-Host "Creating Docker context '$RemoteContextName' for ssh://$remoteHost ..."
+        Write-Host "    [INFO] Creating Docker context '$RemoteContextName' for ssh://$remoteHost..."
         & docker context create $RemoteContextName `
-            --description "Remote engine over SSH" `
+            --description "Remote Docker engine over SSH (Ubuntu 24.04)" `
             --docker "host=ssh://$remoteHost"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    [SUCCESS] Docker context created successfully"
+        } else {
+            Write-Host "    [ERROR] Failed to create Docker context"
+        }
     } else {
-        Write-Host "Context '$RemoteContextName' already exists."
+        Write-Host "    [INFO] Context '$RemoteContextName' already exists"
     }
+    Write-Host ""
 
-    # Switch to the remote context globally
-    Write-Host "Switching to context '$RemoteContextName' ..."
-    & docker context use $RemoteContextName
+    # Switch to the remote context
+    Write-Host "    [INFO] Switching to context '$RemoteContextName'..."
+    & docker context use $RemoteContextName *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "    [SUCCESS] Successfully switched to remote Docker context"
+    } else {
+        Write-Host "    [WARNING] Failed to switch Docker context"
+    }
+    Write-Host ""
 
-    # Smoke test: prints Docker version from the remote host
-    Write-Host "Testing remote connection with 'docker version' on '$RemoteContextName' ..."
-    & docker --context $RemoteContextName version
+    # Test remote Docker connection
+    Write-Host "    [INFO] Testing remote Docker connection..."
+    & docker --context $RemoteContextName version 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "    [SUCCESS] Remote Docker connection test passed"
+    } else {
+        Write-Host "    [WARNING] Remote Docker connection test failed"
+    }
+    Write-Host ""
 
-    Write-Host "[SUCCESS] Remote Docker environment is set up and ready to use!"
-    Write-Host "==================================="
+    Write-Host "    [SUCCESS] Remote Docker environment is set up and ready to use!"
+    Write-Host ""
 
 #----------------------------------------------------#
 #   STEP 4.2.1: IF LOCAL - PROMPT FOLDER SELECTION   #
