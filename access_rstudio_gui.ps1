@@ -241,7 +241,25 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         Write-Host "[INFO] SSH key already exists"
         Write-Host "  Location: $sshKeyPath"
         Write-Host ""
+
+        # Display public key to user
+        $publicKey = Get-Content $sshPublicKeyPath
+    
+        Write-Host ""
+        Write-Host "The following Public Key will be used:"
+        Write-Host "----------------------------------------"
+        Write-Host $publicKey
+        Write-Host "----------------------------------------"
+        Write-Host ""
+        Write-Host "If you are not able to authenticate with GitHub:"
+        Write-Host "1. Go to GitHub -> Settings -> SSH and GPG keys"  
+        Write-Host "2. Check existing SSH keys"
+        Write-Host "3. Compare to the key above and update if needed"
+        Write-Host "================================================"
+        Write-Host ""
+
     } else {
+
         Write-Host "[INFO] Generating new SSH key for Docker operations..."
         Write-Host ""
         
@@ -265,6 +283,39 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             Write-Host ""
             exit 1
         }
+
+        # Show message box with public key only if new key was created
+        $message = "It seems like you did not have an SSH key set up for Docker and GitHub.`n`n" +
+                   "A new SSH public key has been generated.`n`n" +
+                   "Please copy the key below and add it to your GitHub account:`n" +
+                   "GitHub -> Settings -> SSH and GPG keys -> New SSH key`n`n" +
+                   "Public Key:`n$publicKey`n`n" +
+                   "The key has also been copied to your clipboard."
+        
+        # Copy to clipboard
+        try {
+            $publicKey | Set-Clipboard
+            Write-Host "[SUCCESS] Public key copied to clipboard!"
+        } catch {
+            Write-Host "[WARNING] Could not copy to clipboard, but key is displayed."
+        }
+
+        # Show the message box
+        [System.Windows.Forms.MessageBox]::Show($message, 'SSH Key Setup', 'OK', 'Information')
+
+        Write-Host ""
+        Write-Host "Public Key (copy this to GitHub):"
+        Write-Host "----------------------------------------"
+        Write-Host $publicKey
+        Write-Host "----------------------------------------"
+        Write-Host ""
+        Write-Host "Next Steps:"
+        Write-Host "1. Go to GitHub -> Settings -> SSH and GPG keys"  
+        Write-Host "2. Click 'New SSH key'"
+        Write-Host "3. Paste the key above"
+        Write-Host "`nNext: Add this key to GitHub -> Settings -> SSH and GPG keys -> New SSH key"
+        Write-Host "================================================"
+        Write-Host ""
     }
     
     # Start and configure ssh-agent
@@ -289,40 +340,6 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         Write-Host ""
     }
     
-    # Display public key to user
-    $publicKey = Get-Content $sshPublicKeyPath
-    
-    # Show message box with public key
-    $message = "Your SSH public key has been generated/found.`n`n" +
-               "Please copy the key below and add it to your GitHub account:`n" +
-               "GitHub -> Settings -> SSH and GPG keys -> New SSH key`n`n" +
-               "Public Key:`n$publicKey`n`n" +
-               "The key has also been copied to your clipboard."
-    
-    # Copy to clipboard
-    try {
-        $publicKey | Set-Clipboard
-        Write-Host "[SUCCESS] Public key copied to clipboard!"
-    } catch {
-        Write-Host "[WARNING] Could not copy to clipboard, but key is displayed above."
-    }
-    
-    # Show the message box
-    [System.Windows.Forms.MessageBox]::Show($message, 'SSH Key Setup', 'OK', 'Information')
-    
-    Write-Host ""
-    Write-Host "Public Key (copy this to GitHub):"
-    Write-Host "----------------------------------------"
-    Write-Host $publicKey
-    Write-Host "----------------------------------------"
-    Write-Host ""
-    Write-Host "Next Steps:"
-    Write-Host "1. Go to GitHub -> Settings -> SSH and GPG keys"  
-    Write-Host "2. Click 'New SSH key'"
-    Write-Host "3. Paste the key above"
-    Write-Host "`nNext: Add this key to GitHub -> Settings -> SSH and GPG keys -> New SSH key"
-    Write-Host "================================================"
-    Write-Host ""
 }
 
 Write-Host ""
