@@ -1750,28 +1750,76 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     exit 1
 }
 
+#--------------------------------------------------------#
+#   STEP 5: PROMPT FOR STARTING AND STOPPING CONTAINER   #
+#--------------------------------------------------------#
+
+<#
+Logic:
+    0. Before showing the prompt to start/stop we need to check whether there are any containers already running for the given user
+        - If yes, ask whether to stop the existing container or leave it running (but recommend stopping it)
+        - If no, we show the start button only and disable the stop button
+    1. Generate prompt for starting container which includes start and stop buttons
+    2. Users can use tickboxes and textfields to enter the options Chris uses in his function
+    3. Chris function is fully integrated including the UseVolumes option
+    4. On the local everything happens in the local docker context, on the remote likewise with the remote context
+    5. After the user clicks start:
+        - We check whether an image for the repository/model already exists
+        - If not, we pull the pre-requisite image from Docker Hub and compile the model image
+        - If yes, we check whether the user wants to rebuild the image or use the existing one
+        - If yes, we rebuild the image
+        - If no, we check whether a container based on the existing image already exists for the given user
+            - If yes, we start the existing container
+            - If no, we create and start a new container based on the existing image
+            - Here the mounting logic is important (see below)
+        - After the container is started we monitor its status and prompt the user with browser login instructions
+        - The login instructions show the IP and the username and password the user has set at the very beginning
+    6. While the container is running the script and start/stop prompt stays alive but the start button is disabled
+    7. The user can stop the container at any time by clicking the stop button
+    8. If the user closes the script while the container is running we prompt them to stop the container first
+
+
+#>
+
 #-----------------------------------------------------------------------#
 #   STEP 5.1: IF REMOTE - LOGIC FOR MOUNTING FOLDERS AND COPY SSH KEY   #
 #-----------------------------------------------------------------------#
 
-
+<# 
+Logic:
+    1. Collect everything that needs to be mounted locally
+    2. This includes the GitHub SSH key that is needed to clone/pull/push from inside RStudio
+    3. Save all mounts into a dockerargs variable
+    4. Integrate into Chris code including the UseVolumes option
+#>
 
 #----------------------------------------------------------------------#
 #   STEP 5.2: IF LOCAL - LOGIC FOR MOUNTING FOLDERS AND COPY SSH KEY   #
 #----------------------------------------------------------------------#
 
+<# 
+Logic:
+    1. Collect everything that needs to be mounted locally
+    2. This includes the GitHub SSH key that is needed to clone/pull/push from inside RStudio
+    3. Optional: Enable users to mount additional local folders if needed
+    4. Save all mounts into a dockerargs variable
+    5. Integrate into Chris code including the UseVolumes option
+#>
 
 
-#--------------------------------------------------------#
-#   STEP 6: PROMPT FOR STARTING AND STOPPING CONTAINER   #
-#--------------------------------------------------------#
+#------------------------------------------------#
+#   STEP 6: PROMPT AND LOGIC FOR GITHUB PROMPT   #
+#------------------------------------------------#
 
-
+<# 
+Logic:
+    1. After the user has stopped the container, all file changes are synced back to the local/remote repository folder
+    2. We check whether there are any changes in the repository folder (git status)
+    3. If yes, we prompt the user whether they want to commit and push the changes to GitHub
+    4. If yes, we prompt for a commit message and do the commit and push
+    5. If no, we exit the script
+    6. If no changes, we exit the script
+#>
 
 # Show the form and keep script alive
 [void]$form.ShowDialog()
-
-
-#------------------------------------------------#
-#   STEP 7: PROMPT AND LOGIC FOR GITHUB PROMPT   #
-#------------------------------------------------#
