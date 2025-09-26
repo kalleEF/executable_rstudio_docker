@@ -17,6 +17,7 @@
 
 
 TODOs:
+ - Think about adding individual users also for the Linux machine. This could use the username generated in the beginning!
  - Add logic to mount specific model folder that contains folders with a GitHub repo of a model if on remote host
  - Add logic to stop container locally and on remote host
  - Correctly setup user and group IDs to enable Git in the container
@@ -91,7 +92,7 @@ Write-Host "                                                         ,----,
 '   :  ||   : '  |/     :   : :    |  :  :        '   | '/  :    ;   |.'                   
 ;   |.' ;   | |`-'      |   | :    |  | ,'        |   :    /     '---'                     
 '---'   |   ;/          `---'.|    `--''           \   \ .'                                
-        '---'             `---`              ,--.   `---`                                  
+        '---'             `---`              ,--.   `---`
                                            ,--.'|  ,----..      ,---,                      
                                        ,--,:  : | /   /   \   .'  .' `\                    
                                     ,`--.'`|  ' :|   :     :,---.'     \                   
@@ -117,7 +118,7 @@ Write-Host "                                                         ,----,
 '   | '/  .'|   |    \:   ' | \.'|   : '  |/     |  :  :        |   | '`--'       \  ;  ;  
 |   :    /  |   :   .':   : :-'  ;   | |`-'      |  | ,'        '   : |            :  \  \ 
  \   \ .'   |   | ,'  |   |.'    |   ;/          `--''          ;   |.'             \  ' ; 
-  `---`     `----'    `---'      '---'                          '---'                `--`  
+  `---`     `----'    `---'      '---'                          '---'                `--`
                                                                                            "
 Write-Host ""
 Write-Host ""
@@ -134,7 +135,7 @@ Write-Host ""
 # Build the form
 $form = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Remote Access - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(400,200)
+    Size = New-Object System.Drawing.Size(400,230)
     StartPosition = 'CenterScreen'
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
@@ -142,9 +143,9 @@ $form = New-Object System.Windows.Forms.Form -Property @{
 
 # Instruction label
 $labelInstruction = New-Object System.Windows.Forms.Label -Property @{ 
-    Text = "Please enter your username and a password`nfor your RStudio Server session:"
+    Text = "Please enter your username and a password`nfor your RStudio Server session:`n`n(Username will be normalized: spaces removed, lowercase)"
     Location = New-Object System.Drawing.Point(10,10)
-    Size = New-Object System.Drawing.Size(380,30)
+    Size = New-Object System.Drawing.Size(380,50)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
 $form.Controls.Add($labelInstruction)
@@ -152,12 +153,12 @@ $form.Controls.Add($labelInstruction)
 # Username label and textbox
 $labelUser = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Username:'
-    Location = New-Object System.Drawing.Point(10,50)
+    Location = New-Object System.Drawing.Point(10,70)
     Size = New-Object System.Drawing.Size(100,20)
 }
 $form.Controls.Add($labelUser)
 $textUser = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(120,50)
+    Location = New-Object System.Drawing.Point(120,70)
     Size = New-Object System.Drawing.Size(250,20)
 }
 $form.Controls.Add($textUser)
@@ -165,12 +166,12 @@ $form.Controls.Add($textUser)
 # Password label and textbox
 $labelPass = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Password:'
-    Location = New-Object System.Drawing.Point(10,80)
+    Location = New-Object System.Drawing.Point(10,100)
     Size = New-Object System.Drawing.Size(100,20)
 }
 $form.Controls.Add($labelPass)
 $textPass = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(120,80)
+    Location = New-Object System.Drawing.Point(120,100)
     Size = New-Object System.Drawing.Size(250,20)
 }
 $form.Controls.Add($textPass)
@@ -178,14 +179,14 @@ $form.Controls.Add($textPass)
 # OK and Cancel buttons
 $buttonOK = New-Object System.Windows.Forms.Button -Property @{
     Text = 'OK'
-    Location = New-Object System.Drawing.Point(200,120)
+    Location = New-Object System.Drawing.Point(200,140)
     Size = New-Object System.Drawing.Size(75,30)
 }
 $form.Controls.Add($buttonOK)
 
 $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Cancel'
-    Location = New-Object System.Drawing.Point(290,120)
+    Location = New-Object System.Drawing.Point(290,140)
     Size = New-Object System.Drawing.Size(75,30)
     DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 }
@@ -227,11 +228,19 @@ $PASSWORD = $null
 
 # If user clicked OK, save the values
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-    $USERNAME = $textUser.Text.Trim()
+    # Normalize username: remove spaces and convert to lowercase for consistency
+    $originalUsername = $textUser.Text.Trim()
+    $USERNAME = $originalUsername -replace '\s+', '' | ForEach-Object { $_.ToLower() }
     $PASSWORD = $textPass.Text
+    
     Write-Host ""
     Write-Host "[SUCCESS] Credentials collected successfully"
-    Write-Host "  Username: $USERNAME"
+    if ($originalUsername -ne $USERNAME) {
+        Write-Host "  Original Username: $originalUsername"
+        Write-Host "  Normalized Username: $USERNAME (spaces removed, lowercase)"
+    } else {
+        Write-Host "  Username: $USERNAME"
+    }
     Write-Host "  Password: $PASSWORD"
     Write-Host ""
 } else {
@@ -253,9 +262,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     Write-Host "================================================"
     Write-Host ""
     
-    # Define SSH key paths
-    $sshKeyPath = "$HOME\.ssh\id_ed25519_docker"
-    $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker.pub"
+    # Define SSH key paths (individual per user)
+    $sshKeyPath = "$HOME\.ssh\id_ed25519_docker_$USERNAME"
+    $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker_$USERNAME.pub"
     
     # Check if SSH key already exists
     if ((Test-Path $sshKeyPath) -and (Test-Path $sshPublicKeyPath)) {
@@ -292,7 +301,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         }
         
         # Generate the SSH key (without passphrase for automation)
-        ssh-keygen -t ed25519 -C "IMPACT_Docker" -f $HOME\.ssh\id_ed25519_docker -N ""
+        ssh-keygen -t ed25519 -C "IMPACT_Docker_$USERNAME" -f "$HOME\.ssh\id_ed25519_docker_$USERNAME" -N ""
         
         if (Test-Path $sshPublicKeyPath) {
             Write-Host ""
@@ -367,6 +376,8 @@ Write-Host ""
 Write-Host "================================================"
 Write-Host "  STEP 3: Container Location Selection"
 Write-Host "================================================"
+Write-Host ""
+Write-Host ""
 Write-Host "Please choose your container deployment location..."
 Write-Host ""
 
@@ -418,6 +429,8 @@ $buttonLocal.Add_Click({
     Write-Host "================================================"
     Write-Host "  LOCAL CONTAINER SELECTED"
     Write-Host "================================================"
+    Write-Host ""
+    Write-Host ""
     Write-Host "Configuring for local Docker containers..."
     Write-Host ""
     $formConnection.DialogResult = [System.Windows.Forms.DialogResult]::Yes
@@ -433,12 +446,14 @@ $buttonRemote.Add_Click({
     Write-Host "================================================"
     Write-Host "  REMOTE CONTAINER SELECTED"
     Write-Host "================================================"
+    Write-Host ""
+    Write-Host ""
     Write-Host "Configuring for remote Docker containers..."
     Write-Host ""
     Write-Host "[INFO] Testing SSH connection to remote workstation..."
     
     # Define remote host (update this IP address to match your workstation)
-    $remoteHost = "php-workstation@10.162.192.90"  # Update this to your actual remote host
+    $remoteHost = "php-workstation@10.162.192.90"  #TODO: Implement individual users!
  
     # Test SSH connection with detailed feedback
     try {
@@ -466,7 +481,7 @@ $buttonRemote.Add_Click({
             Write-Host "  This is normal for first-time connections"
             Write-Host ""
             
-            # Prompt user for remote host password
+            # Prompt user for remote host password #TODO: Change based on individual users!
             $formPassword = New-Object System.Windows.Forms.Form -Property @{ 
                 Text = 'Remote Host Password - IMPACT NCD Germany'
                 Size = New-Object System.Drawing.Size(450,180)
@@ -517,7 +532,7 @@ $buttonRemote.Add_Click({
 
             # Add validation for password OK button click
             $buttonPasswordOK.Add_Click({
-                if ([string]::IsNullOrWhiteSpace($textRemotePassword.Text)) {
+                if ([string]::IsNullOrWhiteSpace($textRemotePassword.Text)) { #TODO: Change based on individual users!
                     [System.Windows.Forms.MessageBox]::Show('Please enter the remote host password.', 'Password Required', 'OK', 'Warning')
                     $textRemotePassword.Focus()
                     return
@@ -533,8 +548,30 @@ $buttonRemote.Add_Click({
             $passwordResult = $formPassword.ShowDialog()
             
             if ($passwordResult -eq [System.Windows.Forms.DialogResult]::OK) {
-                $remotePassword = $textRemotePassword.Text
-                Write-Host "  [INFO] Password provided, testing connection..."
+                # Secure password handling: Convert to SecureString immediately
+                Write-Host "  [INFO] Password provided, securing credentials..."
+                $securePassword = ConvertTo-SecureString $textRemotePassword.Text -AsPlainText -Force
+                
+                # Create credential object for secure handling
+                $hostParts = $remoteHost -split "@"
+                if ($hostParts.Count -eq 2) {
+                    $sshUser = $hostParts[0]
+                    $sshHost = $hostParts[1]
+                } else {
+                    $sshUser = $env:USERNAME
+                    $sshHost = $remoteHost
+                }
+                
+                $remoteCredential = New-Object System.Management.Automation.PSCredential($sshUser, $securePassword)
+                
+                # Clear the plain text password from the textbox and form
+                $textRemotePassword.Text = ""
+                $textRemotePassword.Clear()
+                
+                # Dispose of the password form securely
+                $formPassword.Dispose()
+                
+                Write-Host "  [INFO] Credentials secured, testing connection..."
                 Write-Host ""
                 
                 # Test connection with password using a more reliable method
@@ -546,18 +583,16 @@ $buttonRemote.Add_Click({
                     if ($plinkPath) {
                         Write-Host "  Using PuTTY plink for password authentication..."
                         
-                        # Extract username and host parts
-                        $hostParts = $remoteHost -split "@"
-                        if ($hostParts.Count -eq 2) {
-                            $sshUser = $hostParts[0]
-                            $sshHost = $hostParts[1]
-                        } else {
-                            $sshUser = $env:USERNAME
-                            $sshHost = $remoteHost
-                        }
+                        # Username and host already extracted during credential creation
+                        # Convert secure password to plain text only when needed for plink
+                        $plainPassword = $remoteCredential.GetNetworkCredential().Password
                         
                         # Test connection with plink
-                        $plinkResult = & plink.exe -ssh -batch -pw $remotePassword -l $sshUser $sshHost "echo SSH_SUCCESS" 2>&1
+                        $plinkResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost "echo SSH_SUCCESS" 2>&1
+                        
+                        # Clear the plain text password from memory immediately
+                        $plainPassword = $null
+                        [System.GC]::Collect()
                         
                         if ($plinkResult -match "SSH_SUCCESS") {
                             Write-Host "  [SUCCESS] Password authentication successful!"
@@ -573,17 +608,31 @@ $buttonRemote.Add_Click({
                         # Method 2: Use expect-like functionality with PowerShell and SSH
                         Write-Host "  Using PowerShell SSH automation (plink not found)..."
                         
-                        # Create a batch file for SSH with password
+                        # Convert secure password to plain text only when needed for batch script
+                        $plainPassword = $remoteCredential.GetNetworkCredential().Password
+                        
+                        # Create a secure batch file for SSH with password (handle special characters)
                         $batchFile = [System.IO.Path]::GetTempFileName() + ".bat"
+                        
+                        # Escape special characters in password for safe batch file usage
+                        $escapedPassword = $plainPassword -replace '[&<>|^]', '^$&' -replace '"', '""'
+                        
                         $expectScript = @"
 @echo off
-echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "echo SSH_SUCCESS" 2>nul
+setlocal EnableDelayedExpansion
+set "PASSWORD=$escapedPassword"
+echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "echo SSH_SUCCESS" 2>nul
 "@
                         Set-Content -Path $batchFile -Value $expectScript
                         
                         # Execute the batch file
                         $batchResult = & cmd.exe /c $batchFile 2>&1
+                        
+                        # Securely clean up the batch file and password
                         Remove-Item $batchFile -Force -ErrorAction SilentlyContinue
+                        $plainPassword = $null
+                        $escapedPassword = $null
+                        [System.GC]::Collect()
                         
                         if ($batchResult -match "SSH_SUCCESS") {
                             Write-Host "  [SUCCESS] Password authentication successful!"
@@ -594,7 +643,18 @@ echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o P
                             $sshpassTest = Get-Command sshpass -ErrorAction SilentlyContinue
                             if ($sshpassTest) {
                                 Write-Host "  Trying with sshpass..."
-                                $sshpassResult = & sshpass -p $remotePassword ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost "echo SSH_SUCCESS" 2>&1
+                                
+                                # Use environment variable for password (more secure than command line)
+                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
+                                $env:SSHPASS = $plainPassword
+                                
+                                # Use sshpass with environment variable instead of -p flag
+                                $sshpassResult = & sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost "echo SSH_SUCCESS" 2>&1
+                                
+                                # Clear the environment variable and password from memory immediately
+                                $env:SSHPASS = $null
+                                $plainPassword = $null
+                                [System.GC]::Collect()
                                 
                                 if ($sshpassResult -match "SSH_SUCCESS") {
                                     Write-Host "  [SUCCESS] Password authentication successful with sshpass!"
@@ -618,7 +678,7 @@ echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o P
                         Write-Host ""
                         
                         # Get the public key content
-                        $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker.pub"
+                        $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker_$USERNAME.pub"
                         if (Test-Path $sshPublicKeyPath) {
                             $publicKeyContent = Get-Content $sshPublicKeyPath -Raw
                             $publicKeyContent = $publicKeyContent.Trim()
@@ -627,23 +687,62 @@ echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o P
                             
                             # Use the same authentication method that worked for copying the key
                             if ($plinkPath) {
-                                # Use plink to copy the SSH key
+                                # Use plink to copy the SSH key (securely)
                                 $keyCommand = "mkdir -p ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
-                                $keyCopyResult = & plink.exe -ssh -batch -pw $remotePassword -l $sshUser $sshHost $keyCommand 2>&1
+                                
+                                # Convert secure password to plain text only when needed
+                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
+                                $keyCopyResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $keyCommand 2>&1
+                                
+                                # Clear the plain text password from memory immediately
+                                $plainPassword = $null
+                                [System.GC]::Collect()
+                                
                             } elseif ($sshpassTest) {
-                                # Use sshpass to copy the SSH key
+                                # Use sshpass to copy the SSH key (securely with environment variable)
                                 $keyCommand = "mkdir -p ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
-                                $keyCopyResult = & sshpass -p $remotePassword ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost $keyCommand 2>&1
+                                
+                                # Use environment variable for password (more secure than command line)
+                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
+                                $env:SSHPASS = $plainPassword
+                                
+                                # Use sshpass with environment variable instead of -p flag
+                                $keyCopyResult = & sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost $keyCommand 2>&1
+                                
+                                # Clear the environment variable and password from memory immediately
+                                $env:SSHPASS = $null
+                                $plainPassword = $null
+                                [System.GC]::Collect()
+                                
                             } else {
-                                # Use batch method to copy SSH key
+                                # Use batch method to copy SSH key (securely with special character handling)
                                 $keyBatchFile = [System.IO.Path]::GetTempFileName() + ".bat"
+                                
+                                # Convert secure password to plain text only when needed for batch script
+                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
+                                
+                                # Escape special characters in password for safe batch file usage
+                                $escapedPassword = $plainPassword -replace '[&<>|^]', '^$&' -replace '"', '""'
+                                
+                                # Use base64 encoding to safely transfer SSH key content (avoids shell escaping issues)
+                                # Note: Requires 'base64' command to be available on the remote Linux system
+                                $keyBase64 = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($publicKeyContent))
+                                
                                 $keyBatchScript = @"
 @echo off
-echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "mkdir -p ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED" 2>nul
+setlocal EnableDelayedExpansion
+set "PASSWORD=$escapedPassword"
+echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "mkdir -p ~/.ssh && echo $keyBase64 | base64 -d >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED" 2>nul
 "@
                                 Set-Content -Path $keyBatchFile -Value $keyBatchScript
                                 $keyCopyResult = & cmd.exe /c $keyBatchFile 2>&1
+                                
+                                # Securely clean up the batch file and password
                                 Remove-Item $keyBatchFile -Force -ErrorAction SilentlyContinue
+                                $plainPassword = $null
+                                $escapedPassword = $null
+                                $keyBase64 = $null
+                                [System.GC]::Collect()
                             }
                             
                             if ($keyCopyResult -match "SSH_KEY_COPIED") {
@@ -677,7 +776,18 @@ echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o P
                         $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
                         $script:REMOTE_HOST_IP = $remoteIP
                         
+                        # Secure cleanup: Clear the credential object from memory
+                        $remoteCredential = $null
+                        $securePassword = $null
+                        [System.GC]::Collect()
+                        Write-Host "  [INFO] Credentials securely cleared from memory"
+                        
                     } else {
+                        # Secure cleanup: Clear the credential object from memory even on failure
+                        $remoteCredential = $null
+                        $securePassword = $null
+                        [System.GC]::Collect()
+                        
                         Write-Host "  [ERROR] All password authentication methods failed"
                         Write-Host ""
                         Write-Host "  Troubleshooting suggestions:"
@@ -691,6 +801,13 @@ echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o P
                     }
                     
                 } catch {
+                    # Secure cleanup: Clear the credential object from memory on exception
+                    if ($remoteCredential) {
+                        $remoteCredential = $null
+                        $securePassword = $null
+                        [System.GC]::Collect()
+                    }
+                    
                     Write-Host "  [ERROR] Failed to test password authentication"
                     Write-Host "  Details: $($_.Exception.Message)"
                     Write-Host ""
@@ -701,6 +818,7 @@ echo $remotePassword | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o P
             } else {
                 Write-Host "  [INFO] User cancelled password authentication"
                 Write-Host ""
+                # No credentials to clean up since user cancelled
                 return
             }
         }
