@@ -3,32 +3,10 @@
  ---------------------------------------------
  This script prompts for username and password, then connects over SSH
  to start or create a Docker container, returning the URL for RStudio.
-    Write-Host "Next: Add this key to GitHub -> Settings -> SSH and GPG keys -> New SSH key"
-    Write-Host "==================================="
-    Write-Host ""
-}sage (uncompiled .ps1):
+
   - Open PowerShell console (not by double-clicking)
   - cd to script folder
-  - Run: `PowerShell -E            Write-Host "[SUCCESS] Confirmed: Git repository found in selected         if (Test-Path $gitPath) {
-            Write-Host "[SUCCESS] Git repository detected in selected folder"
-        } else {
-            Write-Host "[WARNING] No .git directory found in selected folder"er"
-        } else {
-                           # Check again
-                    & docker info 2>&1 | Out-Null
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Host "    [SUCCESS] Docker engine started successfully"
-                    } else {
-                        Write-Host "    [WARNING] Docker engine may still be starting up"
-                        Write-Host "    Please wait a moment and try again"
-                    }
-                } catch {
-                    Write-Host "    [WARNING] Could not automatically start Docker engine"
-                    Write-Host "    Please start Docker Desktop manually"
-                }
-            } else {
-                Write-Host "    [SUCCESS] Docker engine is running"
-            } "[WARNING] No .git directory found in selected folder"utionPolicy Bypass -File .\access_rstudio_gui.ps1 -STA`
+  - Run: `PowerShell -ExecutionPolicy Bypass -File .\access_rstudio_gui.ps1 -STA`
 
  To make it double-clickable:
  1. Install ps2exe (if needed):
@@ -95,18 +73,61 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-# === Configuration ===
-# $remoteHosts   = @("localhost", "php_workstation@10.162.192.90") # SSH user@host
-# $rstudioImages = @("rstudio-impact", "rocker/rstudio") # List your images here
-
 #----------------------------------------------#
 #   STEP 1: PROMPT FOR USERNAME AND PASSWORD   #
 #----------------------------------------------#
 
+Write-Host "                                                         ,----,                
+                  ____  ,-.----.                                   ,/   .`|                
+   ,---,        ,'  , `.\    /  \     ,---,         ,----..      ,`   .'  :                
+,`--.' |     ,-+-,.' _ ||   :    \   '  .' \       /   /   \   ;    ;     /                
+|   :  :  ,-+-. ;   , |||   |  .\ : /  ;    '.    |   :     :.'___,/    ,'                 
+:   |  ' ,--.'|'   |  ;|.   :  |: |:  :       \   .   |  ;. /|    :     |                  
+|   :  ||   |  ,', |  ':|   |   \ ::  |   /\   \  .   ; /--` ;    |.';  ;                  
+'   '  ;|   | /  | |  |||   : .   /|  :  ' ;.   : ;   | ;    `----'  |  |                  
+|   |  |'   | :  | :  |,;   | |`-' |  |  ;/  \   \|   : |        '   :  ;                  
+'   :  ;;   . |  ; |--' |   | ;    '  :  | \  \ ,'.   | '___     |   |  '                  
+|   |  '|   : |  | ,    :   ' |    |  |  '  '--'  '   ; : .'|    '   :  |                  
+'   :  ||   : '  |/     :   : :    |  :  :        '   | '/  :    ;   |.'                   
+;   |.' ;   | |`-'      |   | :    |  | ,'        |   :    /     '---'                     
+'---'   |   ;/          `---'.|    `--''           \   \ .'                                
+        '---'             `---`              ,--.   `---`                                  
+                                           ,--.'|  ,----..      ,---,                      
+                                       ,--,:  : | /   /   \   .'  .' `\                    
+                                    ,`--.'`|  ' :|   :     :,---.'     \                   
+                                    |   :  :  | |.   |  ;. /|   |  .`\  |                  
+                                    :   |   \ | :.   ; /--` :   : |  '  |                  
+                                    |   : '  '; |;   | ;    |   ' '  ;  :                  
+                                    '   ' ;.    ;|   : |    '   | ;  .  |                  
+                                    |   | | \   |.   | '___ |   | :  |  '                  
+                                    '   : |  ; .''   ; : .'|'   : | /  ;                   
+                                    |   | '`--'  '   | '/  :|   | '` ,/                    
+                                    '   : |      |   :    / ;   :  .'                      
+                                    ;   |.'       \   \ .'  |   ,.'                        
+                                    '---'  ____    `---`    '---'        ,--.              
+  ,----..       ,---,.,-.----.           ,'  , `.   ,---,              ,--.'|              
+ /   /   \    ,'  .' |\    /  \       ,-+-,.' _ |  '  .' \         ,--,:  : |        ,---, 
+|   :     : ,---.'   |;   :    \   ,-+-. ;   , || /  ;    '.    ,`--.'`|  ' :       /_ ./| 
+.   |  ;. / |   |   .'|   | .\ :  ,--.'|'   |  ;|:  :       \   |   :  :  | | ,---, |  ' : 
+.   ; /--`  :   :  |-,.   : |: | |   |  ,', |  '::  |   /\   \  :   |   \ | :/___/ \.  : | 
+;   | ;  __ :   |  ;/||   |  \ : |   | /  | |  |||  :  ' ;.   : |   : '  '; | .  \  \ ,' ' 
+|   : |.' .'|   :   .'|   : .  / '   | :  | :  |,|  |  ;/  \   \'   ' ;.    ;  \  ;  `  ,' 
+.   | '_.' :|   |  |-,;   | |  \ ;   . |  ; |--' '  :  | \  \ ,'|   | | \   |   \  \    '  
+'   ; : \  |'   :  ;/||   | ;\  \|   : |  | ,    |  |  '  '--'  '   : |  ; .'    '  \   |  
+'   | '/  .'|   |    \:   ' | \.'|   : '  |/     |  :  :        |   | '`--'       \  ;  ;  
+|   :    /  |   :   .':   : :-'  ;   | |`-'      |  | ,'        '   : |            :  \  \ 
+ \   \ .'   |   | ,'  |   |.'    |   ;/          `--''          ;   |.'             \  ' ; 
+  `---`     `----'    `---'      '---'                          '---'                `--`  
+                                                                                           "
+Write-Host ""
+Write-Host ""
 Write-Host ""
 Write-Host "================================================"
 Write-Host "  IMPACT NCD Germany - Docker Container Manager"
 Write-Host "================================================"
+Write-Host ""
+Write-Host ""
+Write-Host ""
 Write-Host "Initializing application..."
 Write-Host ""
 
