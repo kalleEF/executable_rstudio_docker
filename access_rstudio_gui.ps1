@@ -135,7 +135,7 @@ Write-Host ""
 # Build the form
 $form = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Remote Access - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(400,230)
+    Size = New-Object System.Drawing.Size(450,250)
     StartPosition = 'CenterScreen'
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
@@ -145,7 +145,7 @@ $form = New-Object System.Windows.Forms.Form -Property @{
 $labelInstruction = New-Object System.Windows.Forms.Label -Property @{ 
     Text = "Please enter your username and a password`nfor your RStudio Server session:`n`n(Username will be normalized: spaces removed, lowercase)"
     Location = New-Object System.Drawing.Point(10,10)
-    Size = New-Object System.Drawing.Size(380,50)
+    Size = New-Object System.Drawing.Size(380,70)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
 $form.Controls.Add($labelInstruction)
@@ -153,12 +153,12 @@ $form.Controls.Add($labelInstruction)
 # Username label and textbox
 $labelUser = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Username:'
-    Location = New-Object System.Drawing.Point(10,70)
+    Location = New-Object System.Drawing.Point(10,90)
     Size = New-Object System.Drawing.Size(100,20)
 }
 $form.Controls.Add($labelUser)
 $textUser = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(120,70)
+    Location = New-Object System.Drawing.Point(120,90)
     Size = New-Object System.Drawing.Size(250,20)
 }
 $form.Controls.Add($textUser)
@@ -166,12 +166,12 @@ $form.Controls.Add($textUser)
 # Password label and textbox
 $labelPass = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Password:'
-    Location = New-Object System.Drawing.Point(10,100)
+    Location = New-Object System.Drawing.Point(10,120)
     Size = New-Object System.Drawing.Size(100,20)
 }
 $form.Controls.Add($labelPass)
 $textPass = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(120,100)
+    Location = New-Object System.Drawing.Point(120,120)
     Size = New-Object System.Drawing.Size(250,20)
 }
 $form.Controls.Add($textPass)
@@ -179,14 +179,14 @@ $form.Controls.Add($textPass)
 # OK and Cancel buttons
 $buttonOK = New-Object System.Windows.Forms.Button -Property @{
     Text = 'OK'
-    Location = New-Object System.Drawing.Point(200,140)
+    Location = New-Object System.Drawing.Point(200,160)
     Size = New-Object System.Drawing.Size(75,30)
 }
 $form.Controls.Add($buttonOK)
 
 $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Cancel'
-    Location = New-Object System.Drawing.Point(290,140)
+    Location = New-Object System.Drawing.Point(290,160)
     Size = New-Object System.Drawing.Size(75,30)
     DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 }
@@ -230,8 +230,16 @@ $PASSWORD = $null
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     # Normalize username: remove spaces and convert to lowercase for consistency
     $originalUsername = $textUser.Text.Trim()
-    $USERNAME = $originalUsername -replace '\s+', '' | ForEach-Object { $_.ToLower() }
+    # Fix: Ensure USERNAME is always a string, not an array
+    $USERNAME = ($originalUsername -replace '\s+', '').ToLower()
     $PASSWORD = $textPass.Text
+    
+    # Validate that USERNAME is not empty after normalization
+    if ([string]::IsNullOrWhiteSpace($USERNAME)) {
+        Write-Host "[ERROR] Username became empty after normalization"
+        [System.Windows.Forms.MessageBox]::Show('Username cannot be empty after removing spaces.', 'Invalid Username', 'OK', 'Error')
+        exit 1
+    }
     
     Write-Host ""
     Write-Host "[SUCCESS] Credentials collected successfully"
@@ -247,6 +255,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     Write-Host ""
     Write-Host "[ERROR] User cancelled the dialog - no credentials provided"
     Write-Host ""
+    exit 0
 }
 
 
@@ -263,9 +272,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     Write-Host ""
     
     # Define SSH key paths (individual per user)
-    $sshKeyPath = "$HOME\.ssh\id_ed25519_docker_$USERNAME"
-    $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker_$USERNAME.pub"
-    
+    $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+    $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME.pub"
+
     # Check if SSH key already exists
     if ((Test-Path $sshKeyPath) -and (Test-Path $sshPublicKeyPath)) {
         Write-Host "[INFO] SSH key already exists"
@@ -301,11 +310,49 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         }
         
         # Generate the SSH key (without passphrase for automation)
-        ssh-keygen -t ed25519 -C "IMPACT_Docker_$USERNAME" -f "$HOME\.ssh\id_ed25519_docker_$USERNAME" -N ""
+        Write-Host "  Generating SSH key with parameters:"
+        Write-Host "  - Type: ed25519"
+        Write-Host "  - Comment: IMPACT_$USERNAME"  
+        Write-Host "  - File: $HOME\.ssh\id_ed25519_$USERNAME"
+        Write-Host ""
+        
+        # Use proper argument array to avoid parameter parsing issues
+        $sshKeyGenArgs = @(
+            '-t', 'ed25519',
+            '-C', "IMPACT_$USERNAME",
+            '-f', "$HOME\.ssh\id_ed25519_$USERNAME",
+            '-N', '""',
+            '-q'  # Quiet mode to suppress output
+        )
+        
+        # Execute ssh-keygen with proper argument handling
+        try {
+            & ssh-keygen @sshKeyGenArgs
+            $keyGenResult = $LASTEXITCODE
+        } catch {
+            Write-Host "  [ERROR] ssh-keygen execution failed: $($_.Exception.Message)"
+            $keyGenResult = 1
+        }
+        
+        # Check if SSH key generation was successful
+        if ($keyGenResult -eq 0 -and (Test-Path "$HOME\.ssh\id_ed25519_$USERNAME.pub")) {
+            Write-Host ""
+            Write-Host "[SUCCESS] New SSH key generated successfully!"
+            Write-Host "  Private key: $HOME\.ssh\id_ed25519_$USERNAME"
+            Write-Host "  Public key: $HOME\.ssh\id_ed25519_$USERNAME.pub"
+            Write-Host ""
+        } else {
+            Write-Host ""
+            Write-Host "[ERROR] Failed to generate new SSH key!"
+            Write-Host "  Exit code: $keyGenResult"
+            Write-Host "  Expected public key at: $HOME\.ssh\id_ed25519_$USERNAME.pub"
+            Write-Host ""
+            exit 1
+        }
         
         if (Test-Path $sshPublicKeyPath) {
             Write-Host ""
-            Write-Host "[SUCCESS] SSH key generated successfully!"
+            Write-Host "[SUCCESS] Failsafe check: SSH key generated successfully!"
             Write-Host ""
         } else {
             Write-Host ""
@@ -314,24 +361,96 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             exit 1
         }
 
+        $publicKey = Get-Content $sshPublicKeyPath
+
         # Show message box with public key only if new key was created
         $message = "It seems like you did not have an SSH key set up for Docker and GitHub.`n`n" +
                    "A new SSH public key has been generated.`n`n" +
-                   "Please copy the key below and add it to your GitHub account:`n" +
-                   "GitHub -> Settings -> SSH and GPG keys -> New SSH key`n`n" +
-                   "Public Key:`n$publicKey`n`n" +
-                   "The key has also been copied to your clipboard."
+                   "The new key is here: $sshPublicKeyPath`n`n" +
+                   "You need to add this key to your GitHub account to enable SSH access.`n`n" +
+                   "Please go to:`nGitHub -> Settings -> SSH and GPG keys -> New SSH key`n`n" +
+                   "The key has been copied to your clipboard and will be shown in a separate window for manual copying."
         
         # Copy to clipboard
         try {
             $publicKey | Set-Clipboard
             Write-Host "[SUCCESS] Public key copied to clipboard!"
         } catch {
-            Write-Host "[WARNING] Could not copy to clipboard, but key is displayed."
+            Write-Host "[WARNING] Could not copy to clipboard, but key will be displayed."
         }
 
-        # Show the message box
+        # Show the initial message box
         [System.Windows.Forms.MessageBox]::Show($message, 'SSH Key Setup', 'OK', 'Information')
+
+        # Create a separate dialog with selectable text for the SSH key
+        $formKeyDisplay = New-Object System.Windows.Forms.Form -Property @{ 
+            Text = 'SSH Public Key - Copy to GitHub'
+            Size = New-Object System.Drawing.Size(700,400)
+            StartPosition = 'CenterScreen'
+            FormBorderStyle = 'Sizable'
+            MaximizeBox = $true
+            MinimizeBox = $false
+        }
+
+        # Instruction label
+        $labelKeyInstruction = New-Object System.Windows.Forms.Label -Property @{ 
+            Text = "Copy this SSH public key to GitHub (Settings -> SSH and GPG keys -> New SSH key):"
+            Location = New-Object System.Drawing.Point(10,10)
+            Size = New-Object System.Drawing.Size(670,30)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10, [System.Drawing.FontStyle]::Bold)
+        }
+        $formKeyDisplay.Controls.Add($labelKeyInstruction)
+
+        # Text box with the SSH key (selectable and copyable)
+        $textBoxKey = New-Object System.Windows.Forms.TextBox -Property @{ 
+            Location = New-Object System.Drawing.Point(10,50)
+            Size = New-Object System.Drawing.Size(670,250)
+            Multiline = $true
+            ScrollBars = 'Vertical'
+            ReadOnly = $true
+            Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Regular)
+            Text = $publicKey
+            WordWrap = $false
+        }
+        $formKeyDisplay.Controls.Add($textBoxKey)
+
+        # Select all text by default for easy copying
+        $textBoxKey.SelectAll()
+        $textBoxKey.Focus()
+
+        # Copy button
+        $buttonCopyKey = New-Object System.Windows.Forms.Button -Property @{
+            Text = 'Copy to Clipboard'
+            Location = New-Object System.Drawing.Point(10,320)
+            Size = New-Object System.Drawing.Size(120,30)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        }
+        $formKeyDisplay.Controls.Add($buttonCopyKey)
+
+        $buttonCopyKey.Add_Click({
+            try {
+                $publicKey | Set-Clipboard
+                [System.Windows.Forms.MessageBox]::Show('SSH key copied to clipboard!', 'Copy Success', 'OK', 'Information')
+            } catch {
+                [System.Windows.Forms.MessageBox]::Show('Failed to copy to clipboard. Please select and copy manually.', 'Copy Failed', 'OK', 'Warning')
+            }
+        })
+
+        # Close button
+        $buttonCloseKey = New-Object System.Windows.Forms.Button -Property @{
+            Text = 'Close'
+            Location = New-Object System.Drawing.Point(140,320)
+            Size = New-Object System.Drawing.Size(75,30)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        }
+        $formKeyDisplay.Controls.Add($buttonCloseKey)
+
+        $buttonCloseKey.Add_Click({
+            $formKeyDisplay.Close()
+        })
+
+        # Show the key display dialog
+        $formKeyDisplay.ShowDialog() | Out-Null
 
         Write-Host ""
         Write-Host "Public Key (copy this to GitHub):"
