@@ -1754,15 +1754,864 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
 #   STEP 5: PROMPT FOR STARTING AND STOPPING CONTAINER   #
 #--------------------------------------------------------#
 
+#---------------------#
+#  HELPER FUNCTIONS:  #
+#---------------------#
+
+# 1: Helper function to extract and construct potential paths from the YAML file
+function Get-YamlPathValue {
+    param (
+        [string]$YamlPath,
+        [string]$Key,
+        [string]$BaseDir # Pass ProjectRoot here (already uses forward slashes)
+    )
+    $line = Select-String -Path $YamlPath -Pattern "^$Key\s*:" | Select-Object -First 1
+    if ($line) {
+        $value = ($line.Line -split ":\s*", 2)[1].Split("#")[0].Trim()
+        $constructedPath = $null
+
+        # Check if the path from YAML is absolute (Windows or Unix-like)
+        if ([System.IO.Path]::IsPathRooted($value) -or $value.StartsWith('/')) {
+            $constructedPath = $value
+            Write-Host "Path '$value' for key '$Key' is absolute."
+        } else {
+            # Construct path relative to the specified BaseDir (ProjectRoot)
+            # Ensure BaseDir and value use consistent slashes for joining
+            $valueNormalized = $value -replace '\\', '/'
+            $constructedPath = "$BaseDir/$valueNormalized" # Simple string concatenation with forward slashes
+            # Clean up potential double slashes, except after protocol like C://
+            $constructedPath = $constructedPath -replace '(?<!:)/{2,}', '/'
+            Write-Host "Path '$value' for key '$Key' is relative. Constructed as '$constructedPath'."
+        }
+
+        # Normalize to forward slashes for consistency before returning
+        $normalizedPath = $constructedPath -replace '\\', '/'
+        return $normalizedPath
+    }
+    Write-Host "Warning: No matching line found for key: $Key in '$YamlPath'"
+    return $null
+}
+
+# 2: Helper function to check and create directory
+function Test-AndCreateDirectory {
+    param(
+        [string]$Path,
+        [string]$PathKey # For logging purposes (e.g., "output_dir")
+    )
+    if (-not $Path) {
+        Write-Host "Error: Could not determine $PathKey path from YAML."
+        return $false
+    }
+
+    # Use native path format for Test-Path and New-Item
+    $NativePath = $Path -replace '/', '\\'
+
+    if (-not (Test-Path $NativePath)) {
+        Write-Host "Warning: $PathKey path not found: $NativePath. Creating directory..."
+        try {
+            New-Item -ItemType Directory -Path $NativePath -Force -ErrorAction Stop | Out-Null
+            Write-Host "Successfully created $PathKey directory: $NativePath"
+            return $true
+        } catch {
+            Write-Host "Error: Failed to create $PathKey directory: $NativePath - $($_.Exception.Message)"
+            # Attempt to resolve the path to see if it exists now, maybe a race condition or delay
+            if(Test-Path $NativePath) {
+                 Write-Host "Info: Directory $NativePath seems to exist now despite previous error."
+                 return $true
+            }
+            return $false
+        }
+    } elseif (-not (Get-Item $NativePath).PSIsContainer) {
+        Write-Host "Error: The path specified for $PathKey exists but is a file, not a directory: $NativePath"
+        return $false
+    } else {
+         # Directory exists
+         return $true
+    }
+}
+
+# 3: Helper function to convert Windows path to Docker Desktop/WSL format
+function Convert-PathToDockerFormat {
+    param([string]$Path)
+    # Input example: P:/My_Models/IMPACTncd_Japan
+    # Match drive letter (e.g., P) and the rest of the path
+    if ($Path -match '^([A-Za-z]):/(.*)') {
+        $driveLetter = $matches[1].ToLower()
+        $restOfPath = $matches[2]
+        # Construct the Docker path: /<drive_letter>/<rest_of_path>
+        $dockerPath = "/$driveLetter/$restOfPath"
+        # Remove trailing slash if present
+        $dockerPath = $dockerPath -replace '/$', ''
+        return $dockerPath
+    } else {
+        Write-Warning "Path '$Path' did not match expected Windows format (e.g., C:/path/to/dir)"
+        return $Path # Return original path if format is unexpected
+    }
+}
+
+# Set repository/model and user-specific name for Docker container
+$CONTAINER_NAME = "$($script:SELECTED_REPO)_$USERNAME"
+
+# Check for existing containers with the username
+Write-Host ""
+Write-Host "================================================"
+Write-Host "  STEP 5: Container Status Check"
+Write-Host "================================================"
+Write-Host ""
+
+Write-Host "[INFO] Checking for existing containers for user: $USERNAME"
+Write-Host ""
+
+try {
+    # Get all containers (running and stopped) that contain the username
+    $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[WARNING] Could not check for existing containers. Consider checking manually in Docker Desktop!"
+        Write-Host "  Continuing with container launch..."
+        Write-Host ""
+    } else {
+        # Parse the output to find containers
+        $containerList = $existingContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_ -notmatch "^NAMES" }
+        
+        if ($containerList.Count -gt 0) {
+            Write-Host "[INFO] Found existing containers for user '$USERNAME':"
+            Write-Host ""
+            
+            # Display existing containers
+            Write-Host "  Existing Containers:"
+            Write-Host "  " + ("=" * 80)
+            foreach ($container in $containerList) {
+                if ($container.Trim() -ne "") {
+                    Write-Host "  $container"
+                }
+            }
+            Write-Host "  " + ("=" * 80)
+            Write-Host ""
+            
+            # Check specifically for running containers
+            $runningContainers = & docker ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
+            $runningList = $runningContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_.Trim() -ne "" }
+            
+            if ($runningList.Count -gt 0) {
+                Write-Host "[WARNING] Found $($runningList.Count) RUNNING container(s) for user '$USERNAME':"
+                foreach ($runningContainer in $runningList) {
+                    if ($runningContainer.Trim() -ne "") {
+                        Write-Host "  - $runningContainer (RUNNING)"
+                    }
+                }
+                Write-Host ""
+                Write-Host "RECOMMENDATION: Stop existing containers before launching new ones"
+                Write-Host "to avoid port conflicts and resource issues."
+                Write-Host ""
+                
+                # Prompt user for action
+                $result = [System.Windows.Forms.MessageBox]::Show(
+                    "Found running containers for user '$USERNAME'.`n`n" +
+                    "Running multiple containers for the same user may cause:`n" +
+                    "- Port conflicts`n" +
+                    "- Resource conflicts`n" +
+                    "- Confusion about which container to use`n`n" +
+                    "RECOMMENDATION: Stop existing containers first.`n`n" +
+                    "Do you want to stop all existing containers for user '$USERNAME'?`n`n" +
+                    "Click 'Yes' to stop existing containers`n" +
+                    "Click 'No' to continue with existing containers running`n" +
+                    "Click 'Cancel' to abort and manage containers manually",
+                    "Existing Containers Found - $USERNAME",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+                
+                if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    Write-Host "[INFO] User chose to stop existing containers"
+                    Write-Host ""
+                    Write-Host "Stopping existing containers for user '$USERNAME'..."
+                    
+                    foreach ($runningContainer in $runningList) {
+                        if ($runningContainer.Trim() -ne "") {
+                            Write-Host "  Stopping container: $runningContainer"
+                            & docker stop $runningContainer 2>$null
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "    [SUCCESS] Stopped: $runningContainer"
+                            } else {
+                                Write-Host "    [WARNING] Could not stop: $runningContainer"
+                            }
+                        }
+                    }
+                    Write-Host ""
+                    Write-Host "[SUCCESS] Container cleanup completed"
+                    
+                } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
+                    Write-Host "[INFO] User chose to continue with existing containers running"
+                    Write-Host "[WARNING] Proceeding with existing containers running may cause conflicts"
+                    
+                } else {
+                    Write-Host "[INFO] User cancelled container launch"
+                    Write-Host "Please manage existing containers manually using:"
+                    Write-Host "  docker ps -a                    # List all containers"
+                    Write-Host "  docker stop <container_name>    # Stop a container"
+                    Write-Host "  docker rm <container_name>      # Remove a container"
+                    Write-Host "Otherwise use Docker Desktop app!"
+                    Write-Host ""
+                    exit 0
+                }
+            } else {
+                Write-Host "[INFO] Found existing containers, but none are currently running"
+                Write-Host "  These stopped containers will not interfere with new containers"
+                Write-Host ""
+            }
+        } else {
+            Write-Host "[INFO] No existing containers found for user '$USERNAME'"
+            Write-Host "  Ready to create new container: $CONTAINER_NAME"
+            Write-Host ""
+        }
+    }} catch {
+    Write-Host "[WARNING] Error checking for existing containers: $($_.Exception.Message)"
+    Write-Host "  Continuing with container launch..."
+    Write-Host ""
+}
+
+
+#--------------------------------------------------------#
+#   STEP 6: Container Management Interface               #
+#--------------------------------------------------------#
+
+Write-Host ""
+Write-Host "================================================"
+Write-Host "  STEP 6: Container Management"
+Write-Host "================================================"
+Write-Host ""
+
+Write-Host "[INFO] Preparing container management interface..."
+Write-Host "  Container Name: $CONTAINER_NAME"
+Write-Host "  Selected Repository: $($script:SELECTED_REPO)"
+Write-Host "  Username: $USERNAME"
+Write-Host ""
+
+# Check if the specific container is currently running
+$isContainerRunning = $false
+try {
+    $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
+        $isContainerRunning = $true
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING"
+    } else {
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist"
+    }
+} catch {
+    Write-Host "[WARNING] Could not check container status: $($_.Exception.Message)"
+}
+
+Write-Host ""
+Write-Host "Creating container management interface..."
+Write-Host ""
+
+# Create the main container management form
+$formContainer = New-Object System.Windows.Forms.Form -Property @{ 
+    Text = 'Container Management - IMPACT NCD Germany'
+    Size = New-Object System.Drawing.Size(500,430)
+    StartPosition = 'CenterScreen'
+    FormBorderStyle = 'FixedDialog'
+    MaximizeBox = $false
+}
+
+# Instruction label
+$labelInstruction = New-Object System.Windows.Forms.Label -Property @{ 
+    Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: $(if ($isContainerRunning) { 'RUNNING' } else { 'STOPPED' })"
+    Location = New-Object System.Drawing.Point(10,10)
+    Size = New-Object System.Drawing.Size(470,80)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+}
+$formContainer.Controls.Add($labelInstruction)
+
+# Start button
+$buttonStart = New-Object System.Windows.Forms.Button -Property @{
+    Text = 'Start Container'
+    Location = New-Object System.Drawing.Point(50,100)
+    Size = New-Object System.Drawing.Size(120,40)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    Enabled = -not $isContainerRunning
+}
+$formContainer.Controls.Add($buttonStart)
+
+# Stop button  
+$buttonStop = New-Object System.Windows.Forms.Button -Property @{
+    Text = 'Stop Container'
+    Location = New-Object System.Drawing.Point(200,100)
+    Size = New-Object System.Drawing.Size(120,40)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    Enabled = $isContainerRunning
+}
+$formContainer.Controls.Add($buttonStop)
+
+# Advanced Options section
+$labelAdvanced = New-Object System.Windows.Forms.Label -Property @{ 
+    Text = "Advanced Options:"
+    Location = New-Object System.Drawing.Point(10,160)
+    Size = New-Object System.Drawing.Size(470,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+}
+$formContainer.Controls.Add($labelAdvanced)
+
+# Checkbox option
+$checkBoxVolumes = New-Object System.Windows.Forms.CheckBox -Property @{
+    Text = 'Use Docker Volumes (instead of bind mounts)'
+    Location = New-Object System.Drawing.Point(20,185)
+    Size = New-Object System.Drawing.Size(200,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+}
+$formContainer.Controls.Add($checkBoxVolumes)
+
+# Port override label and textbox
+$labelPort = New-Object System.Windows.Forms.Label -Property @{ 
+    Text = 'Port Override:'
+    Location = New-Object System.Drawing.Point(20,215)
+    Size = New-Object System.Drawing.Size(100,20)
+}
+$formContainer.Controls.Add($labelPort)
+$textBoxPort = New-Object System.Windows.Forms.TextBox -Property @{ 
+    Location = New-Object System.Drawing.Point(130,215)
+    Size = New-Object System.Drawing.Size(100,20)
+    Text = '8787'
+}
+$formContainer.Controls.Add($textBoxPort)
+
+# Custom parameters label and textbox
+$labelParams = New-Object System.Windows.Forms.Label -Property @{ 
+    Text = 'Custom Parameters:'
+    Location = New-Object System.Drawing.Point(20,245)
+    Size = New-Object System.Drawing.Size(120,20)
+}
+$formContainer.Controls.Add($labelParams)
+$textBoxParams = New-Object System.Windows.Forms.TextBox -Property @{ 
+    Location = New-Object System.Drawing.Point(150,245)
+    Size = New-Object System.Drawing.Size(200,20)
+    Text = ''
+}
+$formContainer.Controls.Add($textBoxParams)
+
+# sim_design.yaml file label and textbox
+$labelSimDesign = New-Object System.Windows.Forms.Label -Property @{ 
+    Text = 'sim_design.yaml file used for directory creation:'
+    Location = New-Object System.Drawing.Point(20,275)
+    Size = New-Object System.Drawing.Size(280,20)
+}
+$formContainer.Controls.Add($labelSimDesign)
+$textBoxSimDesign = New-Object System.Windows.Forms.TextBox -Property @{ 
+    Location = New-Object System.Drawing.Point(310,275)
+    Size = New-Object System.Drawing.Size(160,20)
+    Text = '..\inputs\sim_design.yaml'
+}
+$formContainer.Controls.Add($textBoxSimDesign)
+
+# OK and Cancel buttons
+$buttonOK = New-Object System.Windows.Forms.Button -Property @{
+    Text = 'Close'
+    Location = New-Object System.Drawing.Point(200,350)
+    Size = New-Object System.Drawing.Size(75,30)
+}
+$formContainer.Controls.Add($buttonOK)
+
+$buttonCancel = New-Object System.Windows.Forms.Button -Property @{
+    Text = 'Cancel'
+    Location = New-Object System.Drawing.Point(290,350)
+    Size = New-Object System.Drawing.Size(75,30)
+    DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+}
+$formContainer.Controls.Add($buttonCancel)
+
+# Set default buttons
+$formContainer.AcceptButton = $buttonOK
+$formContainer.CancelButton = $buttonCancel
+
+# Event handlers
+$buttonStart.Add_Click({
+    Write-Host ""
+    Write-Host "[INFO] Start button clicked"
+    Write-Host "  Container: $CONTAINER_NAME"
+    
+    # Get options from form
+    $useVolumes = $checkBoxVolumes.Checked
+    $portOverride = $textBoxPort.Text.Trim()
+    $customParams = $textBoxParams.Text.Trim()
+    $simDesignFile = $textBoxSimDesign.Text.Trim()
+    
+    Write-Host "  Advanced Options:"
+    Write-Host "    Use Volumes: $useVolumes"
+    Write-Host "    Port Override: $(if($portOverride) { $portOverride } else { 'Default' })"
+    Write-Host "    Custom Parameters: $(if($customParams) { $customParams } else { 'None' })"
+    Write-Host "    sim_design.yaml file: $(if($simDesignFile) { $simDesignFile } else { 'Default' })"
+    Write-Host ""
+    
+    # TODO: Implement container start logic here
+    [System.Windows.Forms.MessageBox]::Show("Container start logic will be implemented here.`n`nContainer: $CONTAINER_NAME`nOptions: Use Volumes=$useVolumes, Port=$portOverride, Params=$customParams, SimDesign=$simDesignFile", "Start Container", "OK", "Information")
+    
+
+
+    #######################################################################
+    
+
+# Resolve docker setup directory based on current model
+if (-not $script:LOCAL_REPO_PATH -and -not $script:REMOTE_REPO_PATH) {
+    Write-Host "[FATAL ERROR] No path for repository or model found. Please restart the application and select a folder."
+    Exit 1
+} elseif (Test-Path $script:LOCAL_REPO_PATH) {
+    $ScriptDir = "$script:LOCAL_REPO_PATH\docker_setup"
+    Write-Host "[INFO] Using local repository path: $script:LOCAL_REPO_PATH"
+} elseif (Test-Path $script:REMOTE_REPO_PATH) {
+    $ScriptDir = "$script:REMOTE_REPO_PATH/docker_setup"
+    Write-Host "[INFO] Using remote repository path: $script:REMOTE_REPO_PATH"
+} else {
+    Write-Host "[FATAL ERROR] Neither local nor remote repository paths are valid. Please restart the application and select a valid folder."
+    Exit 1
+}
+# Validate that the docker_setup directory exists (THIS IS MANDATORY)
+if (-not (Test-Path $ScriptDir)) {
+    Write-Host "[FATAL ERROR] Your repository has no Docker setup directory at '$ScriptDir'"
+    Exit 1
+}
+
+# Resolve project root directory (one level above the current script directory)
+$ProjectRoot = $script:LOCAL_REPO_PATH
+
+# If SimDesignYaml is a relative path, resolve it relative to the project root
+if (-not [System.IO.Path]::IsPathRooted($SimDesignYaml)) {
+    # Normalize path separators to forward slashes for cross-platform compatibility
+    $SimDesignYamlNormalized = $SimDesignYaml -replace '\\', '/'
+    $TempPath = "$ProjectRoot/$SimDesignYamlNormalized" -replace '/+', '/'
+    # Resolve the path to handle .. components properly
+    $SimDesignYaml = (Resolve-Path $TempPath -ErrorAction SilentlyContinue).Path
+    if (-not $SimDesignYaml) {
+        # If Resolve-Path fails, try manual construction (for the actual inputs directory)
+        if ($SimDesignYamlNormalized -eq "../inputs/sim_design.yaml") {
+            $SimDesignYaml = "$ProjectRoot/inputs/sim_design.yaml"
+        } else {
+            $SimDesignYaml = $TempPath
+        }
+    }
+}
+
+# Validate that the YAML file exists
+if (-not (Test-Path $SimDesignYaml)) {
+    Write-Host "[FATAL ERROR] YAML file not found at '$SimDesignYaml'"
+    Write-Host "Original path provided: '..\inputs\sim_design.yaml'"
+    Write-Host "Project root: '$ProjectRoot'"
+    Exit 1
+}
+
+Write-Host "[INFO] Using configuration file: $SimDesignYaml"
+
+# Check if Docker image for the current model already exists
+$DockerImageName = $script:SELECTED_REPO.ToLower()
+Write-Host "[INFO] Checking for Docker image: $DockerImageName"
+
+# Check if image exists
+$imageExists = $false
+try {
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        # Check locally
+        $imageCheck = & docker images --format "{{.Repository}}" | Where-Object { $_ -eq $DockerImageName }
+        $imageExists = $null -ne $imageCheck
+    } else {
+        # Check on remote host
+        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+        $imageCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker images --format '{{.Repository}}' | grep -q '^$DockerImageName$' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+        $imageExists = $imageCheck -match "EXISTS"
+    }
+} catch {
+    Write-Host "[WARNING] Could not check for existing Docker image: $($_.Exception.Message)"
+    $imageExists = $false
+}
+
+if ($imageExists) {
+    Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your containeralready exists"
+} else {
+    Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..."
+    
+    # Determine Dockerfile path
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        $dockerfilePath = Join-Path $script:LOCAL_REPO_PATH "docker_setup\Dockerfile.IMPACTncdGER"
+        $dockerContextPath = Join-Path $script:LOCAL_REPO_PATH "docker_setup"
+    } else {
+        $dockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.IMPACTncdGER"
+        $dockerContextPath = "$script:REMOTE_REPO_PATH/docker_setup"
+    }
+    
+    Write-Host "[INFO] Using Dockerfile: $dockerfilePath"
+    Write-Host "[INFO] Docker build context: $dockerContextPath"
+    
+    # Check if Dockerfile exists
+    $dockerfileExists = $false
+    try {
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            $dockerfileExists = Test-Path $dockerfilePath
+        } else {
+            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            $dockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "test -f '$dockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+            $dockerfileExists = $dockerfileCheck -match "EXISTS"
+        }
+    } catch {
+        Write-Host "[ERROR] Could not check for Dockerfile: $($_.Exception.Message)"
+        $dockerfileExists = $false
+    }
+    
+    if (-not $dockerfileExists) {
+        Write-Host "[FATAL ERROR] Dockerfile not found at: $dockerfilePath"
+        Write-Host "Please ensure 'Dockerfile.IMPACTncdGER' exists in the docker_setup folder of your repository."
+        Exit 1
+    }
+    
+    # Build the Docker image
+    Write-Host "[INFO] Building Docker image '$DockerImageName'..."
+    Write-Host "This may take several minutes depending on the image size and dependencies..."
+    
+    try {
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            # Local build
+            $buildResult = & docker build -f $dockerfilePath -t $DockerImageName $dockerContextPath 2>&1
+            $buildSuccess = $LASTEXITCODE -eq 0
+        } else {
+            # Remote build
+            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' ."
+            $buildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $buildCommand 2>&1
+            $buildSuccess = $LASTEXITCODE -eq 0
+        }
+        
+        if ($buildSuccess) {
+            Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully!"
+        } else {
+            Write-Host "[WARNING] Failed to build Docker image '$DockerImageName' on first attempt"
+            Write-Host "Build output:"
+            Write-Host $buildResult
+            Write-Host ""
+            Write-Host "[INFO] Attempting fallback: building prerequisite image first..."
+            
+            # Determine prerequisite Dockerfile path
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                $prereqDockerfilePath = Join-Path $script:LOCAL_REPO_PATH "docker_setup\Dockerfile.prerequisite.IMPACTncdGER"
+            } else {
+                $prereqDockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.prerequisite.IMPACTncdGER"
+            }
+            
+            Write-Host "[INFO] Using prerequisite Dockerfile: $prereqDockerfilePath"
+            
+            # Check if prerequisite Dockerfile exists
+            $prereqDockerfileExists = $false
+            try {
+                if ($CONTAINER_LOCATION -eq "LOCAL") {
+                    $prereqDockerfileExists = Test-Path $prereqDockerfilePath
+                } else {
+                    $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                    $prereqDockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+                    $prereqDockerfileExists = $prereqDockerfileCheck -match "EXISTS"
+                }
+            } catch {
+                Write-Host "[ERROR] Could not check for prerequisite Dockerfile: $($_.Exception.Message)"
+                $prereqDockerfileExists = $false
+            }
+            
+            if ($prereqDockerfileExists) {
+                Write-Host "[INFO] Building prerequisite Docker image..."
+                $prereqImageName = "$DockerImageName-prerequisite"
+                
+                try {
+                    if ($CONTAINER_LOCATION -eq "LOCAL") {
+                        # Local build of prerequisite
+                        $prereqBuildResult = & docker build -f $prereqDockerfilePath -t $prereqImageName $dockerContextPath 2>&1
+                        $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                    } else {
+                        # Remote build of prerequisite
+                        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                        $prereqBuildCommand = "cd '$dockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' ."
+                        $prereqBuildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $prereqBuildCommand 2>&1
+                        $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                    }
+                    
+                    if ($prereqBuildSuccess) {
+                        Write-Host "[SUCCESS] Prerequisite image built successfully! Retrying main image build..."
+                        
+                        # Retry building the main image TODO: Add logic that it does not try to build from kalleef account but uses the local prereq image!
+                        try {
+                            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                                # Local build retry
+                                $retryBuildResult = & docker build -f $dockerfilePath -t $DockerImageName $dockerContextPath 2>&1
+                                $retryBuildSuccess = $LASTEXITCODE -eq 0
+                            } else {
+                                # Remote build retry
+                                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                                $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' ."
+                                $retryBuildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $retryBuildCommand 2>&1
+                                $retryBuildSuccess = $LASTEXITCODE -eq 0
+                            }
+                            
+                            if ($retryBuildSuccess) {
+                                Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully after prerequisite build!"
+                            } else {
+                                Write-Host "[ERROR] Failed to build Docker image '$DockerImageName' even after building prerequisite"
+                                Write-Host "Retry build output:"
+                                Write-Host $retryBuildResult
+                                Exit 1
+                            }
+                        } catch {
+                            Write-Host "[ERROR] Exception occurred during retry build: $($_.Exception.Message)"
+                            Exit 1
+                        }
+                    } else {
+                        Write-Host "[ERROR] Failed to build prerequisite Docker image"
+                        Write-Host "Prerequisite build output:"
+                        Write-Host $prereqBuildResult
+                        Exit 1
+                    }
+                } catch {
+                    Write-Host "[ERROR] Exception occurred while building prerequisite image: $($_.Exception.Message)"
+                    Exit 1
+                }
+            } else {
+                Write-Host "[ERROR] Prerequisite Dockerfile not found at: $prereqDockerfilePath"
+                Write-Host "[FATAL ERROR] Cannot build Docker image - both main and prerequisite Dockerfiles failed"
+                Exit 1
+            }
+        }
+    } catch {
+        Write-Host "[ERROR] Exception occurred while building Docker image: $($_.Exception.Message)"
+        Exit 1
+    }
+}
+
+# TODO: Check whether we need the tag option!
+# Determine the Docker image name based on the tag
+#if ($Tag -eq "local") {
+#    $ImageName = "impactncdjpn:local"
+#} else {
+#    $ImageName = "chriskypri/impactncdjpn:$Tag"
+#}
+#Write-Host "[INFO] ]Using Docker image: $ImageName"
+
+# Use current user (for user-specific volume names)
+# Sanitize username for Docker volume names (replace spaces and special characters with underscores)
+$SafeCurrentUser = $USERNAME -replace '[^a-zA-Z0-9]', '_' -replace '__+', '_' -replace '^_|_$', ''
+if ([string]::IsNullOrEmpty($SafeCurrentUser)) {
+    $SafeCurrentUser = "dockeruser"
+    Write-Host "[WARNING] Could not determine a valid username, using fallback: $SafeCurrentUser"
+}
+
+# Get user identity information for non-root Docker execution
+# Note: On Windows, Docker Desktop runs containers in a Linux VM, so we use
+# default UID/GID (1000:1000) which works well for most cases
+$UserId = "1000"
+$GroupId = "1000"
+$UserName = $USERNAME
+# Use a safe group name - if it conflicts, the entrypoint will create a fallback
+$GroupName = "dockergroup"
+
+# Define user-specific Docker volume names using sanitized username (only for output and synthpop)
+$VolumeOutput    = "impactncd_germany_output_$SafeCurrentUser"
+$VolumeSynthpop  = "impactncd_germany_synthpop_$SafeCurrentUser"
+
+# Call the function passing $ProjectRoot
+$outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
+$synthpopDir  = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
+
+# Validate or create output directory
+if (-not (Test-AndCreateDirectory -Path $outputDir -PathKey "output_dir")) {
+    Pop-Location
+    Exit 1
+}
+
+# Validate or create synthpop directory
+if (-not (Test-AndCreateDirectory -Path $synthpopDir -PathKey "synthpop_dir")) {
+    Pop-Location
+    Exit 1
+}
+
+Write-Host "[INFO] Mounting output_dir:    $outputDir"       # Keep using forward slashes for Docker mounts
+Write-Host "[INFO] Mounting synthpop_dir:  $synthpopDir"      # Keep using forward slashes for Docker mounts
+
+
+
+# -----------------------------
+# Run Docker container
+# -----------------------------
+if ($UseVolumes) {
+    Write-Host "`nUsing Docker volumes for outputs and synthpop..."
+
+    # Build rsync-alpine image if it doesn't already exist.
+    $rsyncImage = "rsync-alpine"
+    docker image inspect $rsyncImage > $null 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Building rsync-alpine image..."
+        
+        # Check if Dockerfile.rsync exists
+        $DockerfileRsync = Join-Path $ScriptDir "Dockerfile.rsync"
+        if (Test-Path $DockerfileRsync) {
+            Write-Host "Using Dockerfile.rsync..."
+            docker build -f "$DockerfileRsync" -t $rsyncImage $ScriptDir
+        } else {
+            Write-Host "Dockerfile.rsync not found, creating rsync image inline..."
+            $InlineDockerfile = @"
+FROM alpine:latest
+RUN apk add --no-cache rsync
+"@
+            $InlineDockerfile | docker build -t $rsyncImage -
+        }
+    } else {
+        Write-Host "Using existing rsync-alpine image."
+    }
+
+    # Ensure local output directories exist
+    if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+    if (-not (Test-Path $synthpopDir)) { New-Item -ItemType Directory -Path $synthpopDir | Out-Null }
+
+    # Remove any existing volumes (ignore errors if not removable)
+    Write-Host "Removing any existing volumes (if possible)..."
+    docker volume rm $VolumeOutput -f 2>$null
+    docker volume rm $VolumeSynthpop -f 2>$null
+
+    # Create fresh Docker-managed volumes
+    docker volume create $VolumeOutput | Out-Null
+    docker volume create $VolumeSynthpop | Out-Null
+
+    # Fix volume ownership and pre-populate volumes:
+    # Docker volumes are created with root ownership by default. We need to fix
+    # the ownership before we can populate them as the calling user.
+    Write-Host "Setting correct ownership for Docker volumes..."
+    docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+    docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+
+    # Pre-populate volumes:
+    # The output and synthpop volumes are populated from the respective local folders.
+    Write-Host "Populating output volume from local folder..."
+    # Use permission-tolerant copy with fallback logic
+    docker run --rm --user "${UserId}:${GroupId}" -v "${outputDir}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+    Write-Host "Populating synthpop volume from local folder..."
+    # Use permission-tolerant copy with fallback logic
+    docker run --rm --user "${UserId}:${GroupId}" -v "${synthpopDir}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+
+    # Run the main container with volumes mounted.
+    Write-Host "Running the main container using Docker volumes..."
+    # Construct arguments as an array for reliable passing
+    $dockerArgs = @(
+        "run", "-it", "--rm",
+        # User identity environment variables
+        "-e", "USER_ID=$UserId",
+        "-e", "GROUP_ID=$GroupId", 
+        "-e", "USER_NAME=$UserName",
+        "-e", "GROUP_NAME=$GroupName",
+        # Use -v syntax within the array elements (no project volume needed)
+        "-v", "${VolumeOutput}:/output",
+        "-v", "${VolumeSynthpop}:/synthpop"
+    )
+    
+    # Add scenarios mount if provided
+    if ($ScenariosDir) {
+        $DockerScenariosDir = Convert-PathToDockerFormat -Path $ScenariosDir
+        $dockerArgs += "--mount"
+        $dockerArgs += "type=bind,source=$DockerScenariosDir,target=/IMPACTncd_Japan/scenarios"
+    }
+    
+    # Add final arguments
+    $dockerArgs += "--workdir"
+    $dockerArgs += "/IMPACTncd_Japan"
+    $dockerArgs += $ImageName
+    $dockerArgs += "bash"
+    
+    # Execute docker with the arguments array
+    & docker $dockerArgs
+
+    # After the container exits:
+    # Synchronize the output and synthpop volumes back to the local directories using rsync.
+    Write-Host "Container exited. Syncing volumes back to local directories using rsync (checksum mode)..."
+    # Use ${} to delimit variable name before the colon and add permission flags
+    # Added --no-perms and --chmod=ugo=rwX to prevent permission issues on Windows
+    docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeOutput}:/volume" -v "${outputDir}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+    docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeSynthpop}:/volume" -v "${synthpopDir}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+
+    # Clean up all the Docker volumes used for the simulation.
+    Write-Host "Cleaning up Docker volumes..."
+    docker volume rm $VolumeOutput | Out-Null
+    docker volume rm $VolumeSynthpop | Out-Null
+
+} else {
+    Write-Host "`nUsing direct bind mounts for outputs and synthpop..."
+
+    # Convert paths for Docker bind mount
+    $DockerOutputDir = Convert-PathToDockerFormat -Path $outputDir
+    $DockerSynthpopDir = Convert-PathToDockerFormat -Path $synthpopDir
+
+    Write-Host "Docker Output Dir:   $DockerOutputDir"
+    Write-Host "Docker Synthpop Dir: $DockerSynthpopDir"
+
+    # Pass mount arguments correctly to docker run (no project mount needed)
+    if ($ScenariosDir) {
+        $DockerScenariosDir = Convert-PathToDockerFormat -Path $ScenariosDir
+        docker run -it --rm `
+            -e "USER_ID=$UserId" `
+            -e "GROUP_ID=$GroupId" `
+            -e "USER_NAME=$UserName" `
+            -e "GROUP_NAME=$GroupName" `
+            --mount "type=bind,source=$DockerOutputDir,target=/output" `
+            --mount "type=bind,source=$DockerSynthpopDir,target=/synthpop" `
+            --mount "type=bind,source=$DockerScenariosDir,target=/IMPACTncd_Japan/scenarios" `
+            --workdir /IMPACTncd_Japan `
+            $ImageName `
+            bash
+    } else {
+        docker run -it --rm `
+            -e "USER_ID=$UserId" `
+            -e "GROUP_ID=$GroupId" `
+            -e "USER_NAME=$UserName" `
+            -e "GROUP_NAME=$GroupName" `
+            --mount "type=bind,source=$DockerOutputDir,target=/output" `
+            --mount "type=bind,source=$DockerSynthpopDir,target=/synthpop" `
+            --workdir /IMPACTncd_Japan `
+            $ImageName `
+            bash
+    }
+}
+
+
+
+    #######################################################################
+
+    # Update UI state (placeholder - will be updated after actual container start)
+    # $buttonStart.Enabled = $false
+    # $buttonStop.Enabled = $true
+})
+
+$buttonStop.Add_Click({
+    Write-Host ""
+    Write-Host "[INFO] Stop button clicked"
+    Write-Host "  Container: $CONTAINER_NAME"
+    Write-Host ""
+    
+
+
+    # TODO: Implement container stop logic here
+    #[System.Windows.Forms.MessageBox]::Show("Container stop logic will be implemented here.`n`nContainer: $CONTAINER_NAME", "Stop Container", "OK", "Information")
+    
+    # Update UI state (placeholder - will be updated after actual container stop)
+    # $buttonStart.Enabled = $true
+    # $buttonStop.Enabled = $false
+})
+
+$buttonOK.Add_Click({
+    Write-Host "[INFO] Container management dialog closed"
+    $formContainer.Close()
+})
+
+# Show the container management dialog
+Write-Host "Showing container management interface..."
+$containerResult = $formContainer.ShowDialog()
+
+Write-Host ""
+Write-Host "Container management interface closed."
+Write-Host ""
+
+
+
 <#
 Logic:
-    0. Before showing the prompt to start/stop we need to check whether there are any containers already running for the given user
-        - If yes, ask whether to stop the existing container or leave it running (but recommend stopping it)
-        - If no, we show the start button only and disable the stop button
-    1. Generate prompt for starting container which includes start and stop buttons
-    2. Users can use tickboxes and textfields to enter the options Chris uses in his function
-    3. Chris function is fully integrated including the UseVolumes option
-    4. On the local everything happens in the local docker context, on the remote likewise with the remote context
     5. After the user clicks start:
         - We check whether an image for the repository/model already exists
         - If not, we pull the pre-requisite image from Docker Hub and compile the model image
