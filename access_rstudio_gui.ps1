@@ -1992,6 +1992,9 @@ Write-Host ""
 $isContainerRunning = $false
 try {
     $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    if ($null -eq $runningCheck) {
+        $runningCheck = "this_container_does_not_exist" # Default to non-matching string
+    }
     if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
         $isContainerRunning = $true
         Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING"
@@ -2134,17 +2137,17 @@ $buttonStart.Add_Click({
     $useVolumes = $checkBoxVolumes.Checked
     $portOverride = $textBoxPort.Text.Trim()
     $customParams = $textBoxParams.Text.Trim()
-    $simDesignFile = $textBoxSimDesign.Text.Trim()
+    $SimDesignYAML = $textBoxSimDesign.Text.Trim()
     
     Write-Host "  Advanced Options:"
     Write-Host "    Use Volumes: $useVolumes"
     Write-Host "    Port Override: $(if($portOverride) { $portOverride } else { 'Default' })"
     Write-Host "    Custom Parameters: $(if($customParams) { $customParams } else { 'None' })"
-    Write-Host "    sim_design.yaml file: $(if($simDesignFile) { $simDesignFile } else { 'Default' })"
+    Write-Host "    sim_design.yaml file: $(if($SimDesignYAML) { $SimDesignYAML } else { 'Default' })"
     Write-Host ""
     
     # TODO: Implement container start logic here
-    [System.Windows.Forms.MessageBox]::Show("Container start logic will be implemented here.`n`nContainer: $CONTAINER_NAME`nOptions: Use Volumes=$useVolumes, Port=$portOverride, Params=$customParams, SimDesign=$simDesignFile", "Start Container", "OK", "Information")
+    [System.Windows.Forms.MessageBox]::Show("Container start logic will be implemented here.`n`nContainer: $CONTAINER_NAME`nOptions: Use Volumes=$useVolumes, Port=$portOverride, Params=$customParams, SimDesign=$SimDesignYAML", "Start Container", "OK", "Information")
     
 
 
@@ -2203,7 +2206,7 @@ Write-Host "[INFO] Using configuration file: $SimDesignYaml"
 
 # Check if Docker image for the current model already exists
 $DockerImageName = $script:SELECTED_REPO.ToLower()
-Write-Host "[INFO] Checking for Docker image: $DockerImageName"
+Write-Host "[INFO] Checking if a Docker image for your repo (e.g. $DockerImageName) already exists..."
 
 # Check if image exists
 $imageExists = $false
@@ -2224,17 +2227,17 @@ try {
 }
 
 if ($imageExists) {
-    Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your containeralready exists"
+    Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your container already exists"
 } else {
     Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..."
     
-    # Determine Dockerfile path
+    # Determine Dockerfile path for model image build
     if ($CONTAINER_LOCATION -eq "LOCAL") {
         $dockerfilePath = Join-Path $script:LOCAL_REPO_PATH "docker_setup\Dockerfile.IMPACTncdGER"
-        $dockerContextPath = Join-Path $script:LOCAL_REPO_PATH "docker_setup"
+        $dockerContextPath = $script:LOCAL_REPO_PATH
     } else {
         $dockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.IMPACTncdGER"
-        $dockerContextPath = "$script:REMOTE_REPO_PATH"
+        $dockerContextPath = $script:REMOTE_REPO_PATH
     }
     
     Write-Host "[INFO] Using Dockerfile: $dockerfilePath"
@@ -2265,18 +2268,86 @@ if ($imageExists) {
     Write-Host "[INFO] Building Docker image '$DockerImageName'..."
     Write-Host "This may take several minutes depending on the image size and dependencies..."
     
-    try {
+    #try {
+        # Start timing the build process
+        $buildStartTime = Get-Date
+        Write-Host "[INFO] Docker build started at $(Get-Date -Format 'HH:mm:ss')"
+        Write-Host "[INFO] This process may take 5-15 minutes depending on your system and network speed..."
+        Write-Host "[INFO] Build output will be shown below (this indicates progress):"
+        Write-Host ("=" * 80)
+        
         if ($CONTAINER_LOCATION -eq "LOCAL") { 
-            # Local build
-            $buildResult = & docker build -f $dockerfilePath -t $DockerImageName $dockerContextPath --no-cache 2>&1
-            $buildSuccess = $LASTEXITCODE -eq 0
+            # Local build with real-time output using direct execution
+            Write-Host "[BUILD] Starting local Docker build..."
+            
+            # Build the Docker command as a single string for cmd /c execution
+            $dockerCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
+            Write-Host "[DEBUG] Docker command: $dockerCommand"
+            
+            # Execute Docker build directly and capture output in real-time
+            Write-Host ""
+            Write-Host "[DOCKER BUILD OUTPUT]"
+            Write-Host ("-" * 60)
+            
+            try {
+                # Use Invoke-Expression to run the command and show output directly
+                $buildResult = & cmd /c $dockerCommand '2>&1'
+                $buildSuccess = $LASTEXITCODE -eq 0
+                
+                # Display the output
+                if ($buildResult) {
+                    foreach ($line in $buildResult) {
+                        Write-Host "[DOCKER] $line"
+                    }
+                }
+            } catch {
+                Write-Host "[ERROR] Exception during Docker build: $($_.Exception.Message)"
+                $buildSuccess = $false
+                $buildResult = "Build failed with exception: $($_.Exception.Message)"
+            }
+            
+            Write-Host ("-" * 60)
+            Write-Host ""
+            
         } else {
-            # Remote build
+            # Remote build with real-time output via SSH
+            Write-Host "[BUILD] Starting remote Docker build via SSH..."
             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-            $buildCommand = "cd '$dockerContextPath' && docker build --no-cache -f '$dockerfilePath' -t '$DockerImageName' ."
-            $buildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $buildCommand 2>&1
-            $buildSuccess = $LASTEXITCODE -eq 0
+            $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
+            
+            Write-Host ""
+            Write-Host "[REMOTE DOCKER BUILD OUTPUT]"
+            Write-Host ("-" * 60)
+            
+            try {
+                # Execute SSH command directly and show output in real-time
+                $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$buildCommand`""
+                Write-Host "[DEBUG] SSH command: $sshCommand"
+                
+                $buildResult = & cmd /c $sshCommand '2>&1'
+                $buildSuccess = $LASTEXITCODE -eq 0
+                
+                # Display the output
+                if ($buildResult) {
+                    foreach ($line in $buildResult) {
+                        Write-Host "[REMOTE] $line"
+                    }
+                }
+            } catch {
+                Write-Host "[ERROR] Exception during remote Docker build: $($_.Exception.Message)"
+                $buildSuccess = $false
+                $buildResult = "Remote build failed with exception: $($_.Exception.Message)"
+            }
+            
+            Write-Host ("-" * 60)
+            Write-Host ""
         }
+        
+        $buildEndTime = Get-Date
+        $totalElapsed = $buildEndTime - $buildStartTime
+        Write-Host ("=" * 80)
+        Write-Host "[INFO] Docker build completed at $(Get-Date -Format 'HH:mm:ss')"
+        Write-Host "[INFO] Total build time: $("{0:mm\:ss}" -f $totalElapsed)"
         
         if ($buildSuccess) {
             Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully!"
@@ -2287,11 +2358,14 @@ if ($imageExists) {
             Write-Host ""
             Write-Host "[INFO] Attempting fallback: building prerequisite image first..."
             
-            # Determine prerequisite Dockerfile path
+            # Determine prerequisite Dockerfile path and build context (this time docker_setup folder)
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 $prereqDockerfilePath = Join-Path $script:LOCAL_REPO_PATH "docker_setup\Dockerfile.prerequisite.IMPACTncdGER"
+                $prereqDockerContextPath = Join-Path $script:LOCAL_REPO_PATH "docker_setup"
+
             } else {
                 $prereqDockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.prerequisite.IMPACTncdGER"
+                $prereqDockerContextPath = "$script:REMOTE_REPO_PATH/docker_setup"
             }
             
             Write-Host "[INFO] Using prerequisite Dockerfile: $prereqDockerfilePath"
@@ -2313,37 +2387,167 @@ if ($imageExists) {
             
             if ($prereqDockerfileExists) {
                 Write-Host "[INFO] Building prerequisite Docker image..."
+                Write-Host "[INFO] This may take 3-10 minutes for the prerequisite image..."
                 $prereqImageName = "$DockerImageName-prerequisite"
-                
+
                 try {
+                    # Start timing the prerequisite build
+                    $prereqStartTime = Get-Date
+                    Write-Host "[PREREQ] Prerequisite build started at $(Get-Date -Format 'HH:mm:ss')"
+                    Write-Host ("=" * 60)
+                    
                     if ($CONTAINER_LOCATION -eq "LOCAL") {
-                        # Local build of prerequisite
-                        $prereqBuildResult = & docker build -f $prereqDockerfilePath -t $prereqImageName $dockerContextPath 2>&1
-                        $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                        # Local build of prerequisite with real-time output
+                        Write-Host "[DOCKER-PREREQ] Building prerequisite image locally..."
+                        
+                        # Build the Docker command for prerequisite
+                        $prereqCommand = "docker build -f `"$prereqDockerfilePath`" -t $prereqImageName --no-cache `"$prereqDockerContextPath`""
+                        Write-Host "[DEBUG] Prerequisite command: $prereqCommand"
+                        
+                        Write-Host ""
+                        Write-Host "[PREREQUISITE BUILD OUTPUT]"
+                        Write-Host ("-" * 60)
+                        
+                        try {
+                            # Execute prerequisite build directly and show output in real-time
+                            $prereqBuildResult = & cmd /c $prereqCommand '2>&1'
+                            $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                            
+                            # Display the output
+                            if ($prereqBuildResult) {
+                                foreach ($line in $prereqBuildResult) {
+                                    Write-Host "[DOCKER-PREREQ] $line"
+                                }
+                            }
+                        } catch {
+                            Write-Host "[ERROR] Exception during prerequisite build: $($_.Exception.Message)"
+                            $prereqBuildSuccess = $false
+                            $prereqBuildResult = "Prerequisite build failed with exception: $($_.Exception.Message)"
+                        }
+                        
+                        Write-Host ("-" * 60)
+                        Write-Host ""
+                        
                     } else {
-                        # Remote build of prerequisite
+                        # Remote build of prerequisite with real-time output
+                        Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
                         $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                        $prereqBuildCommand = "cd '$dockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' ."
-                        $prereqBuildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $prereqBuildCommand 2>&1
-                        $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                        $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache . 2>&1"
+                        
+                        Write-Host ""
+                        Write-Host "[REMOTE DOCKER PREREQUISITE BUILD OUTPUT]"
+                        Write-Host ("-" * 60)
+                        
+                        try {
+                            # Execute SSH prerequisite command directly and show output in real-time
+                            $prereqSSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$prereqBuildCommand`""
+                            Write-Host "[DEBUG] SSH prerequisite command: $prereqSSHCommand"
+                            
+                            $prereqBuildResult = & cmd /c $prereqSSHCommand '2>&1'
+                            $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                            
+                            # Display the output
+                            if ($prereqBuildResult) {
+                                foreach ($line in $prereqBuildResult) {
+                                    Write-Host "[DOCKER-PREREQ-REMOTE] $line"
+                                }
+                            }
+                        } catch {
+                            Write-Host "[ERROR] Exception during remote prerequisite build: $($_.Exception.Message)"
+                            $prereqBuildSuccess = $false
+                            $prereqBuildResult = "Remote prerequisite build failed with exception: $($_.Exception.Message)"
+                        }
+                        
+                        Write-Host ("-" * 60)
+                        Write-Host ""
                     }
+                    
+                    $prereqEndTime = Get-Date
+                    $prereqElapsed = $prereqEndTime - $prereqStartTime
+                    Write-Host ("=" * 60)
+                    Write-Host "[DOCKER-PREREQ] Prerequisite build completed in $("{0:mm\:ss}" -f $prereqElapsed)"
                     
                     if ($prereqBuildSuccess) {
                         Write-Host "[SUCCESS] Prerequisite image built successfully! Retrying main image build..."
                         
                         # Retry building the main image TODO: Add logic that it does not try to build from kalleef account but uses the local prereq image!
                         try {
+                            # Start timing the retry build
+                            $retryStartTime = Get-Date
+                            Write-Host "[DOCKER-RETRY] Main image retry build started at $(Get-Date -Format 'HH:mm:ss')"
+                            Write-Host "[DOCKER-RETRY] This should be faster now that prerequisite is built..."
+                            Write-Host ("=" * 60)
+                            
                             if ($CONTAINER_LOCATION -eq "LOCAL") {
-                                # Local build retry
-                                $retryBuildResult = & docker build -f $dockerfilePath -t $DockerImageName $dockerContextPath 2>&1
-                                $retryBuildSuccess = $LASTEXITCODE -eq 0
+                                # Local build retry with real-time output
+                                Write-Host "[DOCKER-RETRY] Retrying main image build locally..."
+                                
+                                # Build the Docker command for retry
+                                $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
+                                Write-Host "[DEBUG] Retry command: $retryCommand"
+                                
+                                Write-Host ""
+                                Write-Host "[DOCKER-RETRY BUILD OUTPUT]"
+                                Write-Host ("-" * 60)
+                                
+                                try {
+                                    # Execute retry build directly and show output in real-time
+                                    $retryBuildResult = & cmd /c $retryCommand '2>&1'
+                                    $retryBuildSuccess = $LASTEXITCODE -eq 0
+                                    
+                                    # Display the output
+                                    if ($retryBuildResult) {
+                                        foreach ($line in $retryBuildResult) {
+                                            Write-Host "[DOCKER-RETRY] $line"
+                                        }
+                                    }
+                                } catch {
+                                    Write-Host "[ERROR] Exception during retry build: $($_.Exception.Message)"
+                                    $retryBuildSuccess = $false
+                                    $retryBuildResult = "Retry build failed with exception: $($_.Exception.Message)"
+                                }
+                                
+                                Write-Host ("-" * 60)
+                                Write-Host ""
+                                
                             } else {
-                                # Remote build retry
+                                # Remote build retry with real-time output
+                                Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
                                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                                $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' ."
-                                $retryBuildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $retryBuildCommand 2>&1
-                                $retryBuildSuccess = $LASTEXITCODE -eq 0
+                                $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
+                                
+                                Write-Host ""
+                                Write-Host "[REMOTE DOCKER RETRY BUILD OUTPUT]"
+                                Write-Host ("-" * 60)
+                                
+                                try {
+                                    # Execute SSH retry command directly and show output in real-time
+                                    $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$retryBuildCommand`""
+                                    Write-Host "[DEBUG] SSH retry command: $retrySSHCommand"
+                                    
+                                    $retryBuildResult = & cmd /c $retrySSHCommand '2>&1'
+                                    $retryBuildSuccess = $LASTEXITCODE -eq 0
+                                    
+                                    # Display the output
+                                    if ($retryBuildResult) {
+                                        foreach ($line in $retryBuildResult) {
+                                            Write-Host "[DOCKER-RETRY-REMOTE] $line"
+                                        }
+                                    }
+                                } catch {
+                                    Write-Host "[ERROR] Exception during remote retry build: $($_.Exception.Message)"
+                                    $retryBuildSuccess = $false
+                                    $retryBuildResult = "Remote retry build failed with exception: $($_.Exception.Message)"
+                                }
+                                
+                                Write-Host ("-" * 60)
+                                Write-Host ""
                             }
+                            
+                            $retryEndTime = Get-Date
+                            $retryElapsed = $retryEndTime - $retryStartTime
+                            Write-Host ("=" * 60)
+                            Write-Host "[DOCKER-RETRY] Retry build completed in $("{0:mm\:ss}" -f $retryElapsed)"
                             
                             if ($retryBuildSuccess) {
                                 Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully after prerequisite build!"
@@ -2373,10 +2577,10 @@ if ($imageExists) {
                 Exit 1
             }
         }
-    } catch {
-        Write-Host "[ERROR] Exception occurred while building Docker image: $($_.Exception.Message)"
-        Exit 1
-    }
+    #} catch {
+    #    Write-Host "[ERROR] Exception occurred while building Docker image: $($_.Exception.Message)"
+    #    Exit 1
+    #}
 }
 
 # TODO: Check whether we need the tag option!
