@@ -2234,7 +2234,7 @@ if ($imageExists) {
         $dockerContextPath = Join-Path $script:LOCAL_REPO_PATH "docker_setup"
     } else {
         $dockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.IMPACTncdGER"
-        $dockerContextPath = "$script:REMOTE_REPO_PATH/docker_setup"
+        $dockerContextPath = "$script:REMOTE_REPO_PATH"
     }
     
     Write-Host "[INFO] Using Dockerfile: $dockerfilePath"
@@ -2266,14 +2266,14 @@ if ($imageExists) {
     Write-Host "This may take several minutes depending on the image size and dependencies..."
     
     try {
-        if ($CONTAINER_LOCATION -eq "LOCAL") {
+        if ($CONTAINER_LOCATION -eq "LOCAL") { 
             # Local build
-            $buildResult = & docker build -f $dockerfilePath -t $DockerImageName $dockerContextPath 2>&1
+            $buildResult = & docker build -f $dockerfilePath -t $DockerImageName $dockerContextPath --no-cache 2>&1
             $buildSuccess = $LASTEXITCODE -eq 0
         } else {
             # Remote build
             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-            $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' ."
+            $buildCommand = "cd '$dockerContextPath' && docker build --no-cache -f '$dockerfilePath' -t '$DockerImageName' ."
             $buildResult = & ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $buildCommand 2>&1
             $buildSuccess = $LASTEXITCODE -eq 0
         }
@@ -2408,6 +2408,10 @@ $GroupName = "dockergroup"
 # Define user-specific Docker volume names using sanitized username (only for output and synthpop)
 $VolumeOutput    = "impactncd_germany_output_$SafeCurrentUser"
 $VolumeSynthpop  = "impactncd_germany_synthpop_$SafeCurrentUser"
+
+
+
+<#
 
 # Call the function passing $ProjectRoot
 $outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
@@ -2570,7 +2574,7 @@ RUN apk add --no-cache rsync
     }
 }
 
-
+#>
 
     #######################################################################
 
