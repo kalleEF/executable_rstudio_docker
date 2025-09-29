@@ -1086,9 +1086,9 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
 #---------------------------------------------------#
 
     Write-Host ""
-    Write-Host "-----------------------------------------"
+    Write-Host "========================================="
     Write-Host "    REPOSITORY SELECTION"
-    Write-Host "-----------------------------------------"
+    Write-Host "========================================="
     Write-Host ""
     
     Write-Host "    [INFO] Creating repository selection dialog..."
@@ -2630,9 +2630,11 @@ $buttonStart.Add_Click({
     #   Run the actual Docker container   #
     #-------------------------------------#
     
-    if ($UseVolumes) {
+    if ($useVolumes) {
         Write-Host "[INFO] Using Docker volumes for outputs and synthpop..."
-
+        
+        <#
+        
         # Build rsync-alpine image if it doesn't already exist.
         $rsyncImage = "rsync-alpine"
         docker image inspect $rsyncImage > $null 2>&1
@@ -2721,6 +2723,8 @@ RUN apk add --no-cache rsync
         Write-Host "[INFO] Cleaning up Docker volumes..."
         docker volume rm $VolumeOutput | Out-Null
         docker volume rm $VolumeSynthpop | Out-Null
+        
+        #>
 
     } else {
         Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..."
@@ -2732,19 +2736,57 @@ RUN apk add --no-cache rsync
         Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
         Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
 
-        # Pass mount arguments correctly to docker run (no project mount needed)
-            docker run -it --rm `
-                -e "USER_ID=$UserId" `
-                -e "GROUP_ID=$GroupId" `
-                -e "USER_NAME=$UserName" `
-                -e "GROUP_NAME=$GroupName" `
-                --mount "type=bind,source=$DockerOutputDir,target=/output" `
-                --mount "type=bind,source=$DockerSynthpopDir,target=/synthpop" `
-                --workdir /IMPACTncd_Germany `
-                $DockerImageName `
-                bash
+        $dockerArgs = @(
+            "run", "-d", "--rm",     
+            # User identity environment variables
+            "--name", "$CONTAINER_NAME",
+            "-e", "USER_ID=$UserId",
+            "-e", "GROUP_ID=$GroupId", 
+            "-e", "USER_NAME=$UserName",
+            "-e", "GROUP_NAME=$GroupName",
+            "-e", "PASSWORD=$PASSWORD"
+            "-e", "DISABLE_AUTH=false",
+            # Port mapping
+            "-p", "8787:8787", #TODO: Enable $portOverride logic here
+            # Use --mount syntax within the array elements (no project volume needed)
+            "--mount", "type=bind,source=$DockerOutputDir,target=/output",
+            "--mount", "type=bind,source=$DockerSynthpopDir,target=/synthpop",
+            # SSH key and known_hosts for git access (read-only)
+            "-v", "${HOME}\.ssh\id_ed25519_${USERNAME}:/keys/id_ed25519_${USERNAME}:ro",
+	        "-v", "${HOME}\.ssh\known_hosts:/etc/ssh/ssh_known_hosts:ro",
+	        "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes"
+        )
+
+        # Add final arguments
+        $dockerArgs += "--workdir"
+        $dockerArgs += "/IMPACTncd_Germany"
+        $dockerArgs += $DockerImageName #TODO: Check Chris' Dockerfile config. This needs to be modified!
+
+        # Execute docker with the arguments array
+        Write-Host "[INFO] Starting RStudio Server container..."
+        & docker $dockerArgs
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[SUCCESS] RStudio Server container started successfully!"
+            Write-Host ""
+            Write-Host "==============================================="
+            Write-Host "  RStudio Server Access Information"
+            Write-Host "==============================================="
+            Write-Host "  URL: http://localhost:8787" #TODO: Enable $portOverride logic here
+            Write-Host "  Username: rstudio"
+            Write-Host "  Password: $PASSWORD"
+            Write-Host ""
+            Write-Host "  Container Name: $CONTAINER_NAME"
+            Write-Host "==============================================="
+            Write-Host ""
+            Write-Host "[INFO] Container is running in the background."
+            Write-Host "[INFO] Use the 'Stop Container' button to stop it when done."
+        } else {
+            Write-Host "[ERROR] Failed to start RStudio Server container"
+        }
     }
 })   
+
 
 
 
