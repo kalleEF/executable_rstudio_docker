@@ -2729,38 +2729,84 @@ RUN apk add --no-cache rsync
     } else {
         Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..."
 
-        # Convert paths for Docker bind mount
-        $DockerOutputDir = Convert-PathToDockerFormat -Path $outputDir
-        $DockerSynthpopDir = Convert-PathToDockerFormat -Path $synthpopDir
+        # Configure Docker arguments based on execution location (LOCAL vs REMOTE)
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            Write-Host "[INFO] Configuring Docker arguments for LOCAL Windows execution..."
+            
+            # Convert paths for Docker bind mount (Windows to WSL format)
+            $DockerOutputDir = Convert-PathToDockerFormat -Path $outputDir
+            $DockerSynthpopDir = Convert-PathToDockerFormat -Path $synthpopDir
+            
+            Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
+            Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
+            
+            # Configure SSH key paths for Windows
+            $sshKeyPath = "${HOME}\.ssh\id_ed25519_${USERNAME}"
+            $knownHostsPath = "${HOME}\.ssh\known_hosts"
+            
+            $dockerArgs = @(
+                "run", "-d", "--rm",     
+                # User identity environment variables
+                "--name", "$CONTAINER_NAME",
+                "-e", "USER_ID=$UserId",
+                "-e", "GROUP_ID=$GroupId", 
+                "-e", "USER_NAME=$UserName",
+                "-e", "GROUP_NAME=$GroupName",
+                "-e", "PASSWORD=$PASSWORD",
+                "-e", "DISABLE_AUTH=false",
+                # Port mapping with override support
+                "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
+                # Directory mounts
+                "--mount", "type=bind,source=$DockerOutputDir,target=/output",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/synthpop",
+                # SSH key and known_hosts for git access (Windows paths)
+                "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
+                "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
+                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+                # Working directory
+                "--workdir", "/IMPACTncd_Germany"
+            )
+            
+        } else {
+            Write-Host "[INFO] Configuring Docker arguments for REMOTE Linux execution..."
+            
+            # For remote execution, paths are already in Unix format
+            $DockerOutputDir = $outputDir
+            $DockerSynthpopDir = $synthpopDir
+            
+            Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
+            Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
+            
+            # Configure SSH key paths for Linux (remote host)
+            $sshKeyPath = "/home/php-workstation/.ssh/id_ed25519_${USERNAME}"
+            $knownHostsPath = "/home/php-workstation/.ssh/known_hosts"
+            
+            $dockerArgs = @(
+                "run", "-d", "--rm",     
+                # User identity environment variables
+                "--name", "$CONTAINER_NAME",
+                "-e", "USER_ID=$UserId",
+                "-e", "GROUP_ID=$GroupId", 
+                "-e", "USER_NAME=$UserName",
+                "-e", "GROUP_NAME=$GroupName",
+                "-e", "PASSWORD=$PASSWORD",
+                "-e", "DISABLE_AUTH=false",
+                # Port mapping with override support
+                "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
+                # Directory mounts (Unix paths)
+                "--mount", "type=bind,source=$DockerOutputDir,target=/output",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/synthpop",
+                # SSH key and known_hosts for git access (Linux paths)
+                "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
+                "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
+                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeySpecking=yes",
+                # Working directory
+                "--workdir", "/IMPACTncd_Germany"
+            )
+        }
 
-        Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
-        Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
-
-        $dockerArgs = @(
-            "run", "-d", "--rm",     
-            # User identity environment variables
-            "--name", "$CONTAINER_NAME",
-            "-e", "USER_ID=$UserId",
-            "-e", "GROUP_ID=$GroupId", 
-            "-e", "USER_NAME=$UserName",
-            "-e", "GROUP_NAME=$GroupName",
-            "-e", "PASSWORD=$PASSWORD"
-            "-e", "DISABLE_AUTH=false",
-            # Port mapping
-            "-p", "8787:8787", #TODO: Enable $portOverride logic here
-            # Use --mount syntax within the array elements (no project volume needed)
-            "--mount", "type=bind,source=$DockerOutputDir,target=/output",
-            "--mount", "type=bind,source=$DockerSynthpopDir,target=/synthpop",
-            # SSH key and known_hosts for git access (read-only)
-            "-v", "${HOME}\.ssh\id_ed25519_${USERNAME}:/keys/id_ed25519_${USERNAME}:ro",
-	        "-v", "${HOME}\.ssh\known_hosts:/etc/ssh/ssh_known_hosts:ro",
-	        "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes"
-        )
-
-        # Add final arguments
-        $dockerArgs += "--workdir"
-        $dockerArgs += "/IMPACTncd_Germany"
-        $dockerArgs += $DockerImageName #TODO: Check Chris' Dockerfile config. This needs to be modified!
+        # Add final argument (Docker image name)
+        $dockerArgs += $DockerImageName
 
         # Execute docker with the arguments array
         Write-Host "[INFO] Starting RStudio Server container..."
@@ -2769,33 +2815,55 @@ RUN apk add --no-cache rsync
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[SUCCESS] RStudio Server container started successfully!"
             Write-Host ""
-            Write-Host "==============================================="
-            Write-Host "  RStudio Server Access Information"
-            Write-Host "==============================================="
-            Write-Host "  URL: http://localhost:8787" #TODO: Enable $portOverride logic here
-            Write-Host "  Username: rstudio"
-            Write-Host "  Password: $PASSWORD"
-            Write-Host ""
-            Write-Host "  Container Name: $CONTAINER_NAME"
-            Write-Host "==============================================="
-            Write-Host ""
-            Write-Host "[INFO] Container is running in the background."
-            Write-Host "[INFO] Use the 'Stop Container' button to stop it when done."
+            
+            # Wait a moment for the container to fully start
+            Write-Host "[INFO] Waiting for RStudio Server to initialize..."
+            Start-Sleep -Seconds 3
+            
+            # Check if container is still running
+            $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            if ($containerStatus) {
+                Write-Host "[SUCCESS] Container is running: $containerStatus"
+                Write-Host ""
+                Write-Host "==============================================="
+                Write-Host "  RStudio Server Access Information"
+                Write-Host "==============================================="
+                if ($CONTAINER_LOCATION -eq "LOCAL") {
+                    Write-Host "  URL: http://localhost:$(if($portOverride) { $portOverride } else { '8787' })"
+                } else {
+                    Write-Host "  URL: http://$($script:REMOTE_HOST_IP):$(if($portOverride) { $portOverride } else { '8787' })"
+                }
+                Write-Host "  Username: rstudio"
+                Write-Host "  Password: $PASSWORD"
+                Write-Host ""
+                Write-Host "  Container Name: $CONTAINER_NAME"
+                Write-Host "  Execution Location: $CONTAINER_LOCATION"
+                Write-Host "==============================================="
+                Write-Host ""
+                Write-Host "[INFO] Container is running in the background."
+                Write-Host "[INFO] Use the 'Stop Container' button to stop it when done."
+                
+                # Update UI state - container started successfully
+                $buttonStart.Enabled = $false
+                $buttonStop.Enabled = $true
+                $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION"
+                
+            } else {
+                Write-Host "[WARNING] Container may have exited. Checking logs..."
+                $containerLogs = & docker logs $CONTAINER_NAME 2>&1
+                Write-Host "[ERROR] Container logs:"
+                Write-Host $containerLogs
+                
+                # Container failed to start properly - keep start button enabled
+                Write-Host "[ERROR] Container failed to start properly. Please check the logs above."
+            }
         } else {
             Write-Host "[ERROR] Failed to start RStudio Server container"
+            Write-Host "Exit code: $LASTEXITCODE"
+            Write-Host "Execution location: $CONTAINER_LOCATION"
         }
     }
 })   
-
-
-
-
-    #######################################################################
-
-    # Update UI state (placeholder - will be updated after actual container start)
-    # $buttonStart.Enabled = $false
-    # $buttonStop.Enabled = $true
-
 
 $buttonStop.Add_Click({
     Write-Host ""
@@ -2803,14 +2871,85 @@ $buttonStop.Add_Click({
     Write-Host "  Container: $CONTAINER_NAME"
     Write-Host ""
     
-
-
-    # TODO: Implement container stop logic here
-    #[System.Windows.Forms.MessageBox]::Show("Container stop logic will be implemented here.`n`nContainer: $CONTAINER_NAME", "Stop Container", "OK", "Information")
+    # Check if container is actually running before attempting to stop
+    Write-Host "[INFO] Checking if container '$CONTAINER_NAME' is running..."
+    $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     
-    # Update UI state (placeholder - will be updated after actual container stop)
-    # $buttonStart.Enabled = $true
-    # $buttonStop.Enabled = $false
+    if ($containerRunning -and $containerRunning.Trim() -eq $CONTAINER_NAME) {
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is running. Stopping..."
+        
+        try {
+            # Stop the container gracefully
+            Write-Host "[INFO] Attempting graceful shutdown (SIGTERM)..."
+            & docker stop $CONTAINER_NAME 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[SUCCESS] Container '$CONTAINER_NAME' stopped successfully"
+                
+                # Wait a moment to ensure container is fully stopped
+                Start-Sleep -Seconds 2
+                
+                # Verify the container is actually stopped
+                $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+                if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
+                    Write-Host "[SUCCESS] Container confirmed stopped"
+                    
+                    # Update UI state - container stopped successfully
+                    $buttonStart.Enabled = $true
+                    $buttonStop.Enabled = $false
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION"
+                    
+                    Write-Host ""
+                    Write-Host "==============================================="
+                    Write-Host "  Container Successfully Stopped"
+                    Write-Host "==============================================="
+                    Write-Host "  Container Name: $CONTAINER_NAME"
+                    Write-Host "  Status: STOPPED"
+                    Write-Host "  Location: $CONTAINER_LOCATION"
+                    Write-Host ""
+                    Write-Host "  You can now start a new container or close"
+                    Write-Host "  this application."
+                    Write-Host "==============================================="
+                    Write-Host ""
+                    
+                } else {
+                    Write-Host "[WARNING] Container may still be running. Please check Docker Desktop$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' })."
+                }
+                
+            } else {
+                Write-Host "[ERROR] Failed to stop container '$CONTAINER_NAME'"
+                Write-Host "[INFO] Attempting force stop..."
+                
+                # Try force stop if graceful stop failed
+                & docker kill $CONTAINER_NAME 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[SUCCESS] Container '$CONTAINER_NAME' force stopped"
+                    # Update UI state
+                    $buttonStart.Enabled = $true
+                    $buttonStop.Enabled = $false
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION"
+                } else {
+                    Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'"
+                    Write-Host "[INFO] Please check Docker$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' }) and stop the container manually if needed"
+                }
+            }
+            
+        } catch {
+            Write-Host "[ERROR] Exception occurred while stopping container: $($_.Exception.Message)"
+            [System.Windows.Forms.MessageBox]::Show("Error stopping container: $($_.Exception.Message)`n`nPlease check Docker Desktop and stop the container manually if needed.", "Container Stop Error", "OK", "Error")
+        }
+        
+    } else {
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is not running"
+        Write-Host "[INFO] No action needed - updating UI state"
+        
+        # Container is already stopped - just update UI
+        $buttonStart.Enabled = $true
+        $buttonStop.Enabled = $false
+        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED"
+        
+        Write-Host "[INFO] UI updated to reflect stopped state"
+    }
 })
 
 $buttonOK.Add_Click({
@@ -2830,22 +2969,7 @@ Write-Host ""
 
 <#
 Logic:
-    5. After the user clicks start:
-        - We check whether an image for the repository/model already exists
-        - If not, we pull the pre-requisite image from Docker Hub and compile the model image
-        - If yes, we check whether the user wants to rebuild the image or use the existing one
-        - If yes, we rebuild the image
-        - If no, we check whether a container based on the existing image already exists for the given user
-            - If yes, we start the existing container
-            - If no, we create and start a new container based on the existing image
-            - Here the mounting logic is important (see below)
-        - After the container is started we monitor its status and prompt the user with browser login instructions
-        - The login instructions show the IP and the username and password the user has set at the very beginning
-    6. While the container is running the script and start/stop prompt stays alive but the start button is disabled
-    7. The user can stop the container at any time by clicking the stop button
     8. If the user closes the script while the container is running we prompt them to stop the container first
-
-
 #>
 
 #-----------------------------------------------------------------------#
@@ -2888,5 +3012,3 @@ Logic:
     6. If no changes, we exit the script
 #>
 
-# Show the form and keep script alive
-[void]$form.ShowDialog()
