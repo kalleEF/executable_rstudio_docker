@@ -1,4 +1,4 @@
-<#
+﻿<#
  PowerShell GUI Launcher for RStudio Containers
  ---------------------------------------------
  This script prompts for username and password, then connects over SSH
@@ -74,11 +74,72 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+#--------------------------------------#
+#   SPINNER FUNCTIONS FOR BUILD FEEDBACK   #
+#--------------------------------------#
+
+# Global spinner variables
+$script:spinnerJob = $null
+$script:spinnerChars = @('|', '/', '-', '\')
+$script:spinnerIndex = 0
+
+function Start-Spinner {
+    param(
+        [string]$Message = "Processing"
+    )
+    
+    # Stop any existing spinner
+    Stop-Spinner
+    
+    # Start new spinner job
+    $script:spinnerJob = Start-Job -ScriptBlock {
+        param($msg, $chars)
+        $index = 0
+        while ($true) {
+            $char = $chars[$index % $chars.Length]
+            Write-Host "`r$msg $char" -NoNewline
+            Start-Sleep -Milliseconds 200
+            $index++
+        }
+    } -ArgumentList $Message, $script:spinnerChars
+}
+
+function Stop-Spinner {
+    if ($script:spinnerJob) {
+        Stop-Job $script:spinnerJob -ErrorAction SilentlyContinue
+        Remove-Job $script:spinnerJob -ErrorAction SilentlyContinue
+        $script:spinnerJob = $null
+        Write-Host "`r" -NoNewline  # Clear the spinner line
+    }
+}
+
+function Show-SpinnerWithProgress {
+    param(
+        [string]$Message,
+        [ScriptBlock]$ScriptBlock
+    )
+    
+    Write-Host "$Message" -NoNewline
+    Start-Spinner -Message ""
+    
+    try {
+        $result = & $ScriptBlock
+        Stop-Spinner
+        Write-Host " [SUCCESS]" -ForegroundColor Green
+        return $result
+    } catch {
+        Stop-Spinner
+        Write-Host " [FAILED]" -ForegroundColor Red
+        throw
+    }
+}
+
 #----------------------------------------------#
 #   STEP 1: PROMPT FOR USERNAME AND PASSWORD   #
 #----------------------------------------------#
 
-Write-Host "                                                         ,----,                
+Write-Host "
+                                                                     ,----,                
                   ____  ,-.----.                                   ,/   .`|                
    ,---,        ,'  , `.\    /  \     ,---,         ,----..      ,`   .'  :                
 ,`--.' |     ,-+-,.' _ ||   :    \   '  .' \       /   /   \   ;    ;     /                
@@ -2196,10 +2257,12 @@ $buttonStart.Add_Click({
     }
 
     Write-Host "[INFO] Using configuration file: $SimDesignYaml"
+    Write-Host ""
 
     # Check if Docker image for the current model already exists
     $DockerImageName = $script:SELECTED_REPO.ToLower()
     Write-Host "[INFO] Checking if a Docker image for your repo (e.g. $DockerImageName) already exists..."
+    Write-Host ""
 
     # Check if image exists
     $imageExists = $false
@@ -2221,8 +2284,10 @@ $buttonStart.Add_Click({
 
     if ($imageExists) {
         Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your container already exists"
+        Write-Host ""
     } else {
         Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..."
+        Write-Host ""
 
         # Determine Dockerfile path for model image build
         if ($CONTAINER_LOCATION -eq "LOCAL") {
@@ -2234,7 +2299,10 @@ $buttonStart.Add_Click({
         }
 
         Write-Host "[INFO] Using Dockerfile: $dockerfilePath"
+        Write-Host ""
+
         Write-Host "[INFO] Docker build context: $dockerContextPath"
+        Write-Host ""
 
         # Check if Dockerfile exists
         $dockerfileExists = $false
@@ -2272,28 +2340,42 @@ $buttonStart.Add_Click({
             if ($CONTAINER_LOCATION -eq "LOCAL") { 
                 # Local build with real-time output using direct execution
                 Write-Host "[BUILD] Starting local Docker build..."
+                Write-Host ""
 
                 # Build the Docker command as a single string for cmd /c execution
                 $dockerCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
                 Write-Host "[DEBUG] Docker command: $dockerCommand"
-
-                # Execute Docker build directly and capture output in real-time
                 Write-Host ""
-                Write-Host "[DOCKER BUILD OUTPUT]"
-                Write-Host ("-" * 60)
 
+                # Execute Docker build with spinner
+                Write-Host "[INFO] Building Docker image (this may take 5-15 minutes)..." -NoNewline
+                Start-Spinner -Message ""
+                
                 try {
                     # Use Invoke-Expression to run the command and show output directly
                     $buildResult = & cmd /c $dockerCommand '2>&1'
                     $buildSuccess = $LASTEXITCODE -eq 0
+                    Stop-Spinner
+                    
+                    if ($buildSuccess) {
+                        Write-Host " [SUCCESS]" -ForegroundColor Green
+                    } else {
+                        Write-Host " [FAILED]" -ForegroundColor Red
+                    }
+                    Write-Host ""
 
                     # Display the output
+                    Write-Host "[DOCKER BUILD OUTPUT]"
+                    Write-Host ("-" * 60)
                     if ($buildResult) {
                         foreach ($line in $buildResult) {
                             Write-Host "[DOCKER] $line"
                         }
                     }
                 } catch {
+                    Stop-Spinner
+                    Write-Host " [FAILED]" -ForegroundColor Red
+                    Write-Host ""
                     Write-Host "[ERROR] Exception during Docker build: $($_.Exception.Message)"
                     $buildSuccess = $false
                     $buildResult = "Build failed with exception: $($_.Exception.Message)"
@@ -2307,10 +2389,11 @@ $buttonStart.Add_Click({
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                 $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
-
                 Write-Host ""
-                Write-Host "[REMOTE DOCKER BUILD OUTPUT]"
-                Write-Host ("-" * 60)
+
+                # Execute remote Docker build with spinner
+                Write-Host "[INFO] Building Docker image on remote host (this may take 5-15 minutes)..." -NoNewline
+                Start-Spinner -Message ""
 
                 try {
                     # Execute SSH command directly and show output in real-time
@@ -2319,14 +2402,27 @@ $buttonStart.Add_Click({
 
                     $buildResult = & cmd /c $sshCommand '2>&1'
                     $buildSuccess = $LASTEXITCODE -eq 0
+                    Stop-Spinner
+                    
+                    if ($buildSuccess) {
+                        Write-Host " [SUCCESS]" -ForegroundColor Green
+                    } else {
+                        Write-Host " [FAILED]" -ForegroundColor Red
+                    }
+                    Write-Host ""
 
                     # Display the output
+                    Write-Host "[REMOTE DOCKER BUILD OUTPUT]"
+                    Write-Host ("-" * 60)
                     if ($buildResult) {
                         foreach ($line in $buildResult) {
                             Write-Host "[REMOTE] $line"
                         }
                     }
                 } catch {
+                    Stop-Spinner
+                    Write-Host " [FAILED]" -ForegroundColor Red
+                    Write-Host ""
                     Write-Host "[ERROR] Exception during remote Docker build: $($_.Exception.Message)"
                     $buildSuccess = $false
                     $buildResult = "Remote build failed with exception: $($_.Exception.Message)"
@@ -2396,23 +2492,37 @@ $buttonStart.Add_Click({
                             # Build the Docker command for prerequisite
                             $prereqCommand = "docker build -f `"$prereqDockerfilePath`" -t $prereqImageName --no-cache `"$prereqDockerContextPath`""
                             Write-Host "[DEBUG] Prerequisite command: $prereqCommand"
-
                             Write-Host ""
-                            Write-Host "[PREREQUISITE BUILD OUTPUT]"
-                            Write-Host ("-" * 60)
+
+                            # Execute prerequisite build with spinner
+                            Write-Host "[INFO] Building prerequisite image (this may take 5-15 minutes)..." -NoNewline
+                            Start-Spinner -Message ""
 
                             try {
                                 # Execute prerequisite build directly and show output in real-time
                                 $prereqBuildResult = & cmd /c $prereqCommand '2>&1'
                                 $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                                Stop-Spinner
+                                
+                                if ($prereqBuildSuccess) {
+                                    Write-Host " [SUCCESS]" -ForegroundColor Green
+                                } else {
+                                    Write-Host " [FAILED]" -ForegroundColor Red
+                                }
+                                Write-Host ""
 
                                 # Display the output
+                                Write-Host "[PREREQUISITE BUILD OUTPUT]"
+                                Write-Host ("-" * 60)
                                 if ($prereqBuildResult) {
                                     foreach ($line in $prereqBuildResult) {
                                         Write-Host "[DOCKER-PREREQ] $line"
                                     }
                                 }
                             } catch {
+                                Stop-Spinner
+                                Write-Host " [FAILED]" -ForegroundColor Red
+                                Write-Host ""
                                 Write-Host "[ERROR] Exception during prerequisite build: $($_.Exception.Message)"
                                 $prereqBuildSuccess = $false
                                 $prereqBuildResult = "Prerequisite build failed with exception: $($_.Exception.Message)"
@@ -2426,10 +2536,11 @@ $buttonStart.Add_Click({
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
                             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                             $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache . 2>&1"
-
                             Write-Host ""
-                            Write-Host "[REMOTE DOCKER PREREQUISITE BUILD OUTPUT]"
-                            Write-Host ("-" * 60)
+
+                            # Execute remote prerequisite build with spinner
+                            Write-Host "[INFO] Building prerequisite image on remote host (this may take 5-15 minutes)..." -NoNewline
+                            Start-Spinner -Message ""
 
                             try {
                                 # Execute SSH prerequisite command directly and show output in real-time
@@ -2438,14 +2549,27 @@ $buttonStart.Add_Click({
 
                                 $prereqBuildResult = & cmd /c $prereqSSHCommand '2>&1'
                                 $prereqBuildSuccess = $LASTEXITCODE -eq 0
+                                Stop-Spinner
+                                
+                                if ($prereqBuildSuccess) {
+                                    Write-Host " [SUCCESS]" -ForegroundColor Green
+                                } else {
+                                    Write-Host " [FAILED]" -ForegroundColor Red
+                                }
+                                Write-Host ""
 
                                 # Display the output
+                                Write-Host "[REMOTE DOCKER PREREQUISITE BUILD OUTPUT]"
+                                Write-Host ("-" * 60)
                                 if ($prereqBuildResult) {
                                     foreach ($line in $prereqBuildResult) {
                                         Write-Host "[DOCKER-PREREQ-REMOTE] $line"
                                     }
                                 }
                             } catch {
+                                Stop-Spinner
+                                Write-Host " [FAILED]" -ForegroundColor Red
+                                Write-Host ""
                                 Write-Host "[ERROR] Exception during remote prerequisite build: $($_.Exception.Message)"
                                 $prereqBuildSuccess = $false
                                 $prereqBuildResult = "Remote prerequisite build failed with exception: $($_.Exception.Message)"
@@ -2478,23 +2602,37 @@ $buttonStart.Add_Click({
                                     # Build the Docker command for retry
                                     $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
                                     Write-Host "[DEBUG] Retry command: $retryCommand"
-
                                     Write-Host ""
-                                    Write-Host "[DOCKER-RETRY BUILD OUTPUT]"
-                                    Write-Host ("-" * 60)
+
+                                    # Execute retry build with spinner
+                                    Write-Host "[INFO] Retrying main image build (should be faster with prerequisite)..." -NoNewline
+                                    Start-Spinner -Message ""
 
                                     try {
                                         # Execute retry build directly and show output in real-time
                                         $retryBuildResult = & cmd /c $retryCommand '2>&1'
                                         $retryBuildSuccess = $LASTEXITCODE -eq 0
+                                        Stop-Spinner
+                                        
+                                        if ($retryBuildSuccess) {
+                                            Write-Host " [SUCCESS]" -ForegroundColor Green
+                                        } else {
+                                            Write-Host " [FAILED]" -ForegroundColor Red
+                                        }
+                                        Write-Host ""
 
                                         # Display the output
+                                        Write-Host "[DOCKER-RETRY BUILD OUTPUT]"
+                                        Write-Host ("-" * 60)
                                         if ($retryBuildResult) {
                                             foreach ($line in $retryBuildResult) {
                                                 Write-Host "[DOCKER-RETRY] $line"
                                             }
                                         }
                                     } catch {
+                                        Stop-Spinner
+                                        Write-Host " [FAILED]" -ForegroundColor Red
+                                        Write-Host ""
                                         Write-Host "[ERROR] Exception during retry build: $($_.Exception.Message)"
                                         $retryBuildSuccess = $false
                                         $retryBuildResult = "Retry build failed with exception: $($_.Exception.Message)"
@@ -2508,10 +2646,11 @@ $buttonStart.Add_Click({
                                     Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
                                     $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                                     $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
-
                                     Write-Host ""
-                                    Write-Host "[REMOTE DOCKER RETRY BUILD OUTPUT]"
-                                    Write-Host ("-" * 60)
+
+                                    # Execute remote retry build with spinner
+                                    Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -NoNewline
+                                    Start-Spinner -Message ""
 
                                     try {
                                         # Execute SSH retry command directly and show output in real-time
@@ -2520,14 +2659,27 @@ $buttonStart.Add_Click({
 
                                         $retryBuildResult = & cmd /c $retrySSHCommand '2>&1'
                                         $retryBuildSuccess = $LASTEXITCODE -eq 0
+                                        Stop-Spinner
+                                        
+                                        if ($retryBuildSuccess) {
+                                            Write-Host " [SUCCESS]" -ForegroundColor Green
+                                        } else {
+                                            Write-Host " [FAILED]" -ForegroundColor Red
+                                        }
+                                        Write-Host ""
 
                                         # Display the output
+                                        Write-Host "[REMOTE DOCKER RETRY BUILD OUTPUT]"
+                                        Write-Host ("-" * 60)
                                         if ($retryBuildResult) {
                                             foreach ($line in $retryBuildResult) {
                                                 Write-Host "[DOCKER-RETRY-REMOTE] $line"
                                             }
                                         }
                                     } catch {
+                                        Stop-Spinner
+                                        Write-Host " [FAILED]" -ForegroundColor Red
+                                        Write-Host ""
                                         Write-Host "[ERROR] Exception during remote retry build: $($_.Exception.Message)"
                                         $retryBuildSuccess = $false
                                         $retryBuildResult = "Remote retry build failed with exception: $($_.Exception.Message)"
@@ -2633,11 +2785,20 @@ $buttonStart.Add_Click({
     if ($useVolumes) {
         Write-Host "[INFO] Using Docker volumes for outputs and synthpop..."
         
-        <#
+        # Configure SSH key paths based on execution location
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            # Configure SSH key paths for Windows
+            $sshKeyPath = "${HOME}\.ssh\id_ed25519_${USERNAME}"
+            $knownHostsPath = "${HOME}\.ssh\known_hosts"
+        } else {
+            # Configure SSH key paths for Linux (remote host)
+            $sshKeyPath = "/home/php-workstation/.ssh/id_ed25519_${USERNAME}"
+            $knownHostsPath = "/home/php-workstation/.ssh/known_hosts"
+        }
         
         # Build rsync-alpine image if it doesn't already exist.
         $rsyncImage = "rsync-alpine"
-        docker image inspect $rsyncImage > $null 2>&1
+        & docker image inspect $rsyncImage > $null 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[INFO] Building rsync-alpine image..."
 
@@ -2645,14 +2806,14 @@ $buttonStart.Add_Click({
             $DockerfileRsync = Join-Path $ScriptDir "Dockerfile.rsync"
             if (Test-Path $DockerfileRsync) {
                 Write-Host "[INFO] Using Dockerfile.rsync..."
-                docker build -f "$DockerfileRsync" -t $rsyncImage $ScriptDir
+                & docker build -f "$DockerfileRsync" -t $rsyncImage $ScriptDir
             } else {
                 Write-Host "[WARNING] Dockerfile.rsync not found, creating rsync image inline..."
                 $InlineDockerfile = @"
 FROM alpine:latest
 RUN apk add --no-cache rsync
 "@
-                $InlineDockerfile | docker build -t $rsyncImage -
+                $InlineDockerfile | & docker build -t $rsyncImage -
             }
         } else {
             Write-Host "[INFO] Using existing rsync-alpine image."
@@ -2664,67 +2825,72 @@ RUN apk add --no-cache rsync
 
         # Remove any existing volumes (ignore errors if not removable)
         Write-Host "[INFO] Removing any existing volumes (if possible)..."
-        docker volume rm $VolumeOutput -f 2>$null
-        docker volume rm $VolumeSynthpop -f 2>$null
+        & docker volume rm $VolumeOutput -f 2>$null
+        & docker volume rm $VolumeSynthpop -f 2>$null
 
         # Create fresh Docker-managed volumes
-        docker volume create $VolumeOutput | Out-Null
-        docker volume create $VolumeSynthpop | Out-Null
+        & docker volume create $VolumeOutput | Out-Null
+        & docker volume create $VolumeSynthpop | Out-Null
 
         # Fix volume ownership and pre-populate volumes:
         # Docker volumes are created with root ownership by default. We need to fix
         # the ownership before we can populate them as the calling user.
         Write-Host "[INFO] Setting correct ownership for Docker volumes..."
-        docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
-        docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+        & docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+        & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+        Write-Host ""
 
         # Pre-populate volumes:
         # The output and synthpop volumes are populated from the respective local folders.
         Write-Host "[INFO] Populating output volume from local folder..."
         # Use permission-tolerant copy with fallback logic
-        docker run --rm --user "${UserId}:${GroupId}" -v "${outputDir}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            # For local Windows, convert paths for Docker
+            $dockerOutputSource = Convert-PathToDockerFormat -Path $outputDir
+            $dockerSynthpopSource = Convert-PathToDockerFormat -Path $synthpopDir
+        } else {
+            # For remote Linux, use paths directly
+            $dockerOutputSource = $outputDir
+            $dockerSynthpopSource = $synthpopDir
+        }
+        
+        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        
         Write-Host "[INFO] Populating synthpop volume from local folder..."
-        # Use permission-tolerant copy with fallback logic
-        docker run --rm --user "${UserId}:${GroupId}" -v "${synthpopDir}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        Write-Host ""
 
         # Run the main container with volumes mounted.
         Write-Host "[INFO] Running the main container using Docker volumes..."
         # Construct arguments as an array for reliable passing
         $dockerArgs = @(
-            "run", "-it", "--rm",
+            "run", "-d", "--rm",     
             # User identity environment variables
+            "--name", "$CONTAINER_NAME",
             "-e", "USER_ID=$UserId",
             "-e", "GROUP_ID=$GroupId", 
             "-e", "USER_NAME=$UserName",
             "-e", "GROUP_NAME=$GroupName",
-            # Use -v syntax within the array elements (no project volume needed)
+            "-e", "PASSWORD=$PASSWORD",
+            "-e", "DISABLE_AUTH=false",
+            # Port mapping with override support
+            "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
+            # Directory mounts
             "-v", "${VolumeOutput}:/output",
-            "-v", "${VolumeSynthpop}:/synthpop"
+            "-v", "${VolumeSynthpop}:/synthpop",
+            # SSH key and known_hosts for git access (Windows paths)
+            "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
+            "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
+            "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+            # Working directory
+            "--workdir", "/IMPACTncd_Germany"
         )
 
-        # Add final arguments
-        $dockerArgs += "--workdir"
-        $dockerArgs += "/IMPACTncd_Germany"
+        # Add final argument
         $dockerArgs += $DockerImageName
-        $dockerArgs += "bash"
 
         # Execute docker with the arguments array
         & docker $dockerArgs
-
-        # After the container exits:
-        # Synchronize the output and synthpop volumes back to the local directories using rsync.
-        Write-Host "[INFO] Container exited. Syncing volumes back to local directories using rsync (checksum mode)..."
-        # Use ${} to delimit variable name before the colon and add permission flags
-        # Added --no-perms and --chmod=ugo=rwX to prevent permission issues on Windows
-        docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeOutput}:/volume" -v "${outputDir}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
-        docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeSynthpop}:/volume" -v "${synthpopDir}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
-
-        # Clean up all the Docker volumes used for the simulation.
-        Write-Host "[INFO] Cleaning up Docker volumes..."
-        docker volume rm $VolumeOutput | Out-Null
-        docker volume rm $VolumeSynthpop | Out-Null
-        
-        #>
 
     } else {
         Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..."
@@ -2799,7 +2965,7 @@ RUN apk add --no-cache rsync
                 # SSH key and known_hosts for git access (Linux paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
-                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeySpecking=yes",
+                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
                 # Working directory
                 "--workdir", "/IMPACTncd_Germany"
             )
@@ -2811,6 +2977,8 @@ RUN apk add --no-cache rsync
         # Execute docker with the arguments array
         Write-Host "[INFO] Starting RStudio Server container..."
         & docker $dockerArgs
+        Write-Host ""
+        Write-Host ""
         
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[SUCCESS] RStudio Server container started successfully!"
@@ -2874,6 +3042,7 @@ $buttonStop.Add_Click({
     # Check if container is actually running before attempting to stop
     Write-Host "[INFO] Checking if container '$CONTAINER_NAME' is running..."
     $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    Write-Host ""
     
     if ($containerRunning -and $containerRunning.Trim() -eq $CONTAINER_NAME) {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is running. Stopping..."
@@ -2885,6 +3054,7 @@ $buttonStop.Add_Click({
             
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "[SUCCESS] Container '$CONTAINER_NAME' stopped successfully"
+                Write-Host ""
                 
                 # Wait a moment to ensure container is fully stopped
                 Start-Sleep -Seconds 2
@@ -2892,8 +3062,39 @@ $buttonStop.Add_Click({
                 # Verify the container is actually stopped
                 $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
-                    Write-Host "[SUCCESS] Container confirmed stopped"
+                    Write-Host "[SUCCESS] Container confirmed stopped."
                     
+                    if ($useVolumes) {
+                        Write-Host ""
+                        # After the container exits:
+                        # Synchronize the output and synthpop volumes back to the local directories using rsync.
+                        Write-Host "[INFO] Container exited. Syncing volumes back to local directories using rsync (checksum mode)..."
+                        Write-Host ""
+                        
+                        # Configure paths based on execution location
+                        if ($CONTAINER_LOCATION -eq "LOCAL") {
+                            # For local Windows, convert paths for Docker
+                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $outputDir
+                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $synthpopDir
+                        } else {
+                            # For remote Linux, use paths directly
+                            $dockerOutputBackup = $outputDir
+                            $dockerSynthpopBackup = $synthpopDir
+                        }
+                        
+                        # Use ${} to delimit variable name before the colon and add permission flags
+                        # Added --no-perms and --chmod=ugo=rwX to prevent permission issues on Windows
+                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeOutput}:/volume" -v "${dockerOutputBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeSynthpop}:/volume" -v "${dockerSynthpopBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        Write-Host ""
+
+                        # Clean up all the Docker volumes used for the simulation.
+                        Write-Host "[INFO] Cleaning up Docker volumes..."
+                        & docker volume rm $VolumeOutput | Out-Null
+                        & docker volume rm $VolumeSynthpop | Out-Null
+                        Write-Host ""
+                    }    
+
                     # Update UI state - container stopped successfully
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
@@ -2919,11 +3120,35 @@ $buttonStop.Add_Click({
             } else {
                 Write-Host "[ERROR] Failed to stop container '$CONTAINER_NAME'"
                 Write-Host "[INFO] Attempting force stop..."
+                Write-Host ""
                 
                 # Try force stop if graceful stop failed
                 & docker kill $CONTAINER_NAME 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[SUCCESS] Container '$CONTAINER_NAME' force stopped"
+                    Write-Host ""
+                    
+                    # Handle volume cleanup for force stop too
+                    if ($useVolumes) {
+                        Write-Host "[INFO] Force stopped - performing volume sync and cleanup..."
+                        Write-Host ""
+                        
+                        # Configure paths based on execution location
+                        if ($CONTAINER_LOCATION -eq "LOCAL") {
+                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $outputDir
+                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $synthpopDir
+                        } else {
+                            $dockerOutputBackup = $outputDir
+                            $dockerSynthpopBackup = $synthpopDir
+                        }
+                        
+                        # Quick sync and cleanup
+                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeOutput}:/volume" -v "${dockerOutputBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
+                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeSynthpop}:/volume" -v "${dockerSynthpopBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
+                        & docker volume rm $VolumeOutput $VolumeSynthpop -f 2>$null
+                        Write-Host ""
+                    }
+                    
                     # Update UI state
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
@@ -2931,6 +3156,7 @@ $buttonStop.Add_Click({
                 } else {
                     Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'"
                     Write-Host "[INFO] Please check Docker$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' }) and stop the container manually if needed"
+                    Write-Host ""
                 }
             }
             
@@ -2942,6 +3168,7 @@ $buttonStop.Add_Click({
     } else {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is not running"
         Write-Host "[INFO] No action needed - updating UI state"
+        Write-Host ""
         
         # Container is already stopped - just update UI
         $buttonStart.Enabled = $true
@@ -2949,6 +3176,7 @@ $buttonStop.Add_Click({
         $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED"
         
         Write-Host "[INFO] UI updated to reflect stopped state"
+        Write-Host ""
     }
 })
 
@@ -3011,4 +3239,6 @@ Logic:
     5. If no, we exit the script
     6. If no changes, we exit the script
 #>
+
+
 
