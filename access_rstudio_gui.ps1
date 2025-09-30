@@ -3163,6 +3163,7 @@ RUN apk add --no-cache rsync
             "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
             "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
             "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+            "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
             # Working directory
             "--workdir", "/home/rstudio/IMPACTncd_Germany"
         )
@@ -3306,6 +3307,7 @@ RUN apk add --no-cache rsync
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
                 "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+                "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
                 # Working directory
                 "--workdir", "/home/rstudio/IMPACTncd_Germany"
             )
