@@ -2890,7 +2890,62 @@ RUN apk add --no-cache rsync
         $dockerArgs += $DockerImageName
 
         # Execute docker with the arguments array
+        Write-Host "[INFO] Starting RStudio Server container with volumes..."
         & docker $dockerArgs
+        Write-Host ""
+        Write-Host ""
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[SUCCESS] RStudio Server container started successfully!"
+            Write-Host ""
+            
+            # Wait a moment for the container to fully start
+            Write-Host "[INFO] Waiting for RStudio Server to initialize..."
+            Start-Sleep -Seconds 3
+            
+            # Check if container is still running
+            $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            if ($containerStatus) {
+                Write-Host "[SUCCESS] Container is running: $containerStatus"
+                Write-Host ""
+                Write-Host "==============================================="
+                Write-Host "  RStudio Server Access Information"
+                Write-Host "==============================================="
+                if ($CONTAINER_LOCATION -eq "LOCAL") {
+                    Write-Host "  URL: http://localhost:$(if($portOverride) { $portOverride } else { '8787' })"
+                } else {
+                    Write-Host "  URL: http://$($script:REMOTE_HOST_IP):$(if($portOverride) { $portOverride } else { '8787' })"
+                }
+                Write-Host "  Username: rstudio"
+                Write-Host "  Password: $PASSWORD"
+                Write-Host ""
+                Write-Host "  Container Name: $CONTAINER_NAME"
+                Write-Host "  Execution Location: $CONTAINER_LOCATION"
+                Write-Host "  Using Docker Volumes: Yes"
+                Write-Host "==============================================="
+                Write-Host ""
+                Write-Host "[INFO] Container is running in the background."
+                Write-Host "[INFO] Use the 'Stop Container' button to stop it when done."
+                
+                # Update UI state - container started successfully
+                $buttonStart.Enabled = $false
+                $buttonStop.Enabled = $true
+                $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION`nVolumes: Enabled"
+                
+            } else {
+                Write-Host "[WARNING] Container may have exited. Checking logs..."
+                $containerLogs = & docker logs $CONTAINER_NAME 2>&1
+                Write-Host "[ERROR] Container logs:"
+                Write-Host $containerLogs
+                
+                # Container failed to start properly - keep start button enabled
+                Write-Host "[ERROR] Container failed to start properly. Please check the logs above."
+            }
+        } else {
+            Write-Host "[ERROR] Failed to start RStudio Server container with volumes"
+            Write-Host "Exit code: $LASTEXITCODE"
+            Write-Host "Execution location: $CONTAINER_LOCATION"
+        }
 
     } else {
         Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..."
@@ -3014,7 +3069,7 @@ RUN apk add --no-cache rsync
                 # Update UI state - container started successfully
                 $buttonStart.Enabled = $false
                 $buttonStop.Enabled = $true
-                $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION"
+                $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION`nVolumes: Disabled"
                 
             } else {
                 Write-Host "[WARNING] Container may have exited. Checking logs..."
@@ -3098,7 +3153,7 @@ $buttonStop.Add_Click({
                     # Update UI state - container stopped successfully
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION"
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
                     
                     Write-Host ""
                     Write-Host "==============================================="
@@ -3152,7 +3207,7 @@ $buttonStop.Add_Click({
                     # Update UI state
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION"
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
                 } else {
                     Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'"
                     Write-Host "[INFO] Please check Docker$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' }) and stop the container manually if needed"
@@ -3173,7 +3228,7 @@ $buttonStop.Add_Click({
         # Container is already stopped - just update UI
         $buttonStart.Enabled = $true
         $buttonStop.Enabled = $false
-        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED"
+        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
         
         Write-Host "[INFO] UI updated to reflect stopped state"
         Write-Host ""
