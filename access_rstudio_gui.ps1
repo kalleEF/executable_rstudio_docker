@@ -49,13 +49,17 @@ if (-not $isAdmin) {
             exit
         } else {
             # If running interactively or as a compiled exe
+            Write-Host ""
             Write-Host "Please restart this application as Administrator."
+            Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("This application requires Administrator privileges to manage Docker containers.`n`nPlease right-click and select 'Run as Administrator'.", "Administrator Required", "OK", "Warning")
             exit 1
         }
     } catch {
+        Write-Host ""
         Write-Host "Could not automatically elevate privileges."
         Write-Host "Please manually restart this application as Administrator."
+        Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("This application requires Administrator privileges to manage Docker containers.`n`nPlease right-click and select 'Run as Administrator'.", "Administrator Required", "OK", "Warning")
         exit 1
     }
@@ -262,7 +266,9 @@ $buttonOK.Add_Click({
     # Validate username
     if ([string]::IsNullOrWhiteSpace($textUser.Text)) {
         [System.Windows.Forms.MessageBox]::Show('Please enter a username.', 'Error', 'OK', 'Error')
+        Write-Host ""
         Write-Host "ERROR: No username provided"
+        Write-Host ""
         $textUser.Focus()
         return
     }
@@ -270,7 +276,9 @@ $buttonOK.Add_Click({
     # Validate password
     if ([string]::IsNullOrWhiteSpace($textPass.Text)) {
         [System.Windows.Forms.MessageBox]::Show('Please enter a password.', 'Error', 'OK', 'Error')
+        Write-Host ""
         Write-Host "ERROR: No password provided"
+        Write-Host ""
         $textPass.Focus()
         return
     }
@@ -297,7 +305,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     
     # Validate that USERNAME is not empty after normalization
     if ([string]::IsNullOrWhiteSpace($USERNAME)) {
+        Write-Host ""
         Write-Host "[ERROR] Username became empty after normalization"
+        Write-Host ""
         [System.Windows.Forms.MessageBox]::Show('Username cannot be empty after removing spaces.', 'Invalid Username', 'OK', 'Error')
         exit 1
     }
@@ -367,7 +377,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         $sshDir = "$HOME\.ssh"
         if (-not (Test-Path $sshDir)) {
             New-Item -Path $sshDir -ItemType Directory -Force | Out-Null
+            Write-Host ""
             Write-Host "  Created .ssh directory"
+            Write-Host ""
         }
         
         # Generate the SSH key (without passphrase for automation)
@@ -391,7 +403,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             & ssh-keygen @sshKeyGenArgs
             $keyGenResult = $LASTEXITCODE
         } catch {
+            Write-Host ""
             Write-Host "  [ERROR] ssh-keygen execution failed: $($_.Exception.Message)"
+            Write-Host ""
             $keyGenResult = 1
         }
         
@@ -434,84 +448,144 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         
         # Copy to clipboard
         try {
-            $publicKey | Set-Clipboard
+            $publicKey | Set-Clipboard | Out-Null
+            Write-Host ""
             Write-Host "[SUCCESS] Public key copied to clipboard!"
+            Write-Host ""
         } catch {
+            Write-Host ""
             Write-Host "[WARNING] Could not copy to clipboard, but key will be displayed."
+            Write-Host ""
         }
 
         # Show the initial message box
-        [System.Windows.Forms.MessageBox]::Show($message, 'SSH Key Setup', 'OK', 'Information')
+        [System.Windows.Forms.MessageBox]::Show($message, 'SSH Key Setup', 'OK', 'Information') | Out-Null
 
-        # Create a separate dialog with selectable text for the SSH key
+        # Create a modern, well-designed dialog for SSH key display
         $formKeyDisplay = New-Object System.Windows.Forms.Form -Property @{ 
-            Text = 'SSH Public Key - Copy to GitHub'
-            Size = New-Object System.Drawing.Size(700,400)
+            Text = 'SSH Public Key - GitHub Integration'
+            Size = New-Object System.Drawing.Size(800,500)
             StartPosition = 'CenterScreen'
-            FormBorderStyle = 'Sizable'
-            MaximizeBox = $true
+            FormBorderStyle = 'FixedDialog'
+            MaximizeBox = $false
             MinimizeBox = $false
+            BackColor = [System.Drawing.Color]::White
         }
 
-        # Instruction label
+        # Title label with better styling
+        $labelTitle = New-Object System.Windows.Forms.Label -Property @{ 
+            Text = "SSH Public Key Generated"
+            Location = New-Object System.Drawing.Point(20,15)
+            Size = New-Object System.Drawing.Size(760,35)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 14, [System.Drawing.FontStyle]::Bold)
+            ForeColor = [System.Drawing.Color]::DarkBlue
+            TextAlign = 'MiddleCenter'
+        }
+        $formKeyDisplay.Controls.Add($labelTitle)
+
+        # Instruction label with better formatting and spacing
         $labelKeyInstruction = New-Object System.Windows.Forms.Label -Property @{ 
-            Text = "Copy this SSH public key to GitHub (Settings -> SSH and GPG keys -> New SSH key):"
-            Location = New-Object System.Drawing.Point(10,10)
-            Size = New-Object System.Drawing.Size(670,30)
-            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10, [System.Drawing.FontStyle]::Bold)
+            Text = "To enable GitHub integration, copy this SSH public key to your GitHub account:`n`nGitHub → Settings → SSH and GPG keys → New SSH key"
+            Location = New-Object System.Drawing.Point(20,60)
+            Size = New-Object System.Drawing.Size(760,60)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10, [System.Drawing.FontStyle]::Regular)
+            ForeColor = [System.Drawing.Color]::DarkSlateGray
         }
         $formKeyDisplay.Controls.Add($labelKeyInstruction)
 
-        # Text box with the SSH key (selectable and copyable)
+        # Text box with improved styling and better dimensions
         $textBoxKey = New-Object System.Windows.Forms.TextBox -Property @{ 
-            Location = New-Object System.Drawing.Point(10,50)
-            Size = New-Object System.Drawing.Size(670,250)
+            Location = New-Object System.Drawing.Point(20,130)
+            Size = New-Object System.Drawing.Size(760,250)
             Multiline = $true
             ScrollBars = 'Vertical'
             ReadOnly = $true
-            Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Regular)
+            Font = New-Object System.Drawing.Font("Consolas", 10, [System.Drawing.FontStyle]::Regular)
             Text = $publicKey
             WordWrap = $false
+            BackColor = [System.Drawing.Color]::WhiteSmoke
+            BorderStyle = 'Fixed3D'
         }
         $formKeyDisplay.Controls.Add($textBoxKey)
 
-        # Select all text by default for easy copying
-        $textBoxKey.SelectAll()
-        $textBoxKey.Focus()
+        # Automatically select all text and focus for easy copying
+        $formKeyDisplay.Add_Shown({
+            $textBoxKey.SelectAll()
+            $textBoxKey.Focus()
+        })
 
-        # Copy button
+        # Copy button with better positioning and styling
         $buttonCopyKey = New-Object System.Windows.Forms.Button -Property @{
             Text = 'Copy to Clipboard'
-            Location = New-Object System.Drawing.Point(10,320)
-            Size = New-Object System.Drawing.Size(120,30)
-            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+            Location = New-Object System.Drawing.Point(500,400)
+            Size = New-Object System.Drawing.Size(140,35)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10, [System.Drawing.FontStyle]::Bold)
+            BackColor = [System.Drawing.Color]::LightGreen
+            ForeColor = [System.Drawing.Color]::DarkGreen
+            FlatStyle = 'Flat'
         }
         $formKeyDisplay.Controls.Add($buttonCopyKey)
 
         $buttonCopyKey.Add_Click({
             try {
-                $publicKey | Set-Clipboard
-                [System.Windows.Forms.MessageBox]::Show('SSH key copied to clipboard!', 'Copy Success', 'OK', 'Information')
+                $publicKey | Set-Clipboard | Out-Null
+                $buttonCopyKey.Text = 'Copied!'
+                $buttonCopyKey.BackColor = [System.Drawing.Color]::LightBlue
+                $buttonCopyKey.Enabled = $false
+                
+                # Re-enable button after 2 seconds with proper error handling
+                $script:copyTimer = New-Object System.Windows.Forms.Timer
+                $script:copyTimer.Interval = 2000
+                $script:copyTimer.Add_Tick({
+                    try {
+                        if ($buttonCopyKey -and -not $buttonCopyKey.IsDisposed) {
+                            $buttonCopyKey.Text = 'Copy to Clipboard'
+                            $buttonCopyKey.BackColor = [System.Drawing.Color]::LightGreen
+                            $buttonCopyKey.Enabled = $true
+                        }
+                        if ($script:copyTimer -and -not $script:copyTimer.Disposed) {
+                            $script:copyTimer.Stop()
+                            $script:copyTimer.Dispose()
+                            $script:copyTimer = $null
+                        }
+                    } catch {
+                        # Silently handle any timer cleanup errors
+                        if ($script:copyTimer) {
+                            try { $script:copyTimer.Dispose() } catch { }
+                            $script:copyTimer = $null
+                        }
+                    }
+                })
+                $script:copyTimer.Start()
             } catch {
-                [System.Windows.Forms.MessageBox]::Show('Failed to copy to clipboard. Please select and copy manually.', 'Copy Failed', 'OK', 'Warning')
+                [System.Windows.Forms.MessageBox]::Show('Failed to copy to clipboard. Please select all text and copy manually using Ctrl+C.', 'Copy Failed', 'OK', 'Warning') | Out-Null
             }
         })
 
-        # Close button
+        # Close button with better positioning and styling
         $buttonCloseKey = New-Object System.Windows.Forms.Button -Property @{
             Text = 'Close'
-            Location = New-Object System.Drawing.Point(140,320)
-            Size = New-Object System.Drawing.Size(75,30)
-            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+            Location = New-Object System.Drawing.Point(660,400)
+            Size = New-Object System.Drawing.Size(120,35)
+            Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10, [System.Drawing.FontStyle]::Bold)
+            BackColor = [System.Drawing.Color]::LightCoral
+            ForeColor = [System.Drawing.Color]::DarkRed
+            FlatStyle = 'Flat'
+            DialogResult = [System.Windows.Forms.DialogResult]::OK
         }
         $formKeyDisplay.Controls.Add($buttonCloseKey)
 
         $buttonCloseKey.Add_Click({
+            $formKeyDisplay.DialogResult = [System.Windows.Forms.DialogResult]::OK
             $formKeyDisplay.Close()
         })
 
-        # Show the key display dialog
-        $formKeyDisplay.ShowDialog() | Out-Null
+        # Set form properties for better behavior
+        $formKeyDisplay.AcceptButton = $buttonCloseKey
+        $formKeyDisplay.CancelButton = $buttonCloseKey
+        
+        # Show the key display dialog and suppress output
+        $null = $formKeyDisplay.ShowDialog()
 
         Write-Host ""
         Write-Host "Public Key (copy this to GitHub):"
@@ -530,22 +604,27 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     
     # Start and configure ssh-agent
     try {
+        Write-Host ""
         Write-Host "[INFO] Configuring SSH agent..."
+        Write-Host ""
         
         # Start ssh-agent service if not running
         $sshAgentService = Get-Service ssh-agent -ErrorAction SilentlyContinue
         if ($sshAgentService.Status -ne 'Running') {
             Set-Service ssh-agent -StartupType Automatic
             Start-Service ssh-agent
+            Write-Host ""
             Write-Host "  SSH agent service started"
         }
         
         # Add key to ssh-agent
         ssh-add $sshKeyPath
+        Write-Host ""
         Write-Host "  SSH key added to agent"
         Write-Host ""
         
     } catch {
+        Write-Host ""
         Write-Host "[WARNING] Could not configure SSH agent. Key may still work for GitHub."
         Write-Host ""
     }
@@ -630,23 +709,29 @@ $buttonRemote.Add_Click({
     Write-Host ""
     Write-Host "Configuring for remote Docker containers..."
     Write-Host ""
+    Write-Host ""
     Write-Host "[INFO] Testing SSH connection to remote workstation..."
+    Write-Host ""
     
     # Define remote host (update this IP address to match your workstation)
     $remoteHost = "php-workstation@10.162.192.90"  #TODO: Implement individual users!
  
     # Test SSH connection with detailed feedback
     try {
+        Write-Host ""
         Write-Host "  Attempting connection to: $remoteHost"
         Write-Host ""
         
         # First, try SSH key authentication (no password needed)
+        Write-Host ""
         Write-Host "  [INFO] Testing SSH key authentication..."
+        Write-Host ""
         $sshTestResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
         
         $SSHEXITCODE = $LASTEXITCODE
 
         if ($SSHEXITCODE -eq 0) {
+            Write-Host ""
             Write-Host "  [SUCCESS] SSH key authentication successful!"
             Write-Host "  Response: $sshTestResult"
             Write-Host "  Remote workstation is reachable"
@@ -657,6 +742,7 @@ $buttonRemote.Add_Click({
             $script:REMOTE_HOST_IP = $remoteIP
             
         } else {
+            Write-Host ""
             Write-Host "  [INFO] SSH key authentication failed - password authentication required"
             Write-Host "  This is normal for first-time connections"
             Write-Host ""
@@ -729,7 +815,9 @@ $buttonRemote.Add_Click({
             
             if ($passwordResult -eq [System.Windows.Forms.DialogResult]::OK) {
                 # Secure password handling: Convert to SecureString immediately
+                Write-Host ""
                 Write-Host "  [INFO] Password provided, securing credentials..."
+                Write-Host ""
                 $securePassword = ConvertTo-SecureString $textRemotePassword.Text -AsPlainText -Force
                 
                 # Create credential object for secure handling
@@ -751,17 +839,22 @@ $buttonRemote.Add_Click({
                 # Dispose of the password form securely
                 $formPassword.Dispose()
                 
+                Write-Host ""
                 Write-Host "  [INFO] Credentials secured, testing connection..."
                 Write-Host ""
                 
                 # Test connection with password using a more reliable method
                 try {
+                    Write-Host ""
                     Write-Host "  [INFO] Testing SSH connection with password..."
-                    
+                    Write-Host ""
+
                     # Method 1: Try using plink (PuTTY's command line tool) if available
                     $plinkPath = Get-Command plink.exe -ErrorAction SilentlyContinue
                     if ($plinkPath) {
+                        Write-Host ""
                         Write-Host "  Using PuTTY plink for password authentication..."
+                        Write-Host ""
                         
                         # Username and host already extracted during credential creation
                         # Convert secure password to plain text only when needed for plink
@@ -775,10 +868,12 @@ $buttonRemote.Add_Click({
                         [System.GC]::Collect()
                         
                         if ($plinkResult -match "SSH_SUCCESS") {
+                            Write-Host ""
                             Write-Host "  [SUCCESS] Password authentication successful!"
                             Write-Host ""
                             $authSuccess = $true
                         } else {
+                            Write-Host ""
                             Write-Host "  [ERROR] Password authentication failed with plink"
                             Write-Host "  Output: $plinkResult"
                             $authSuccess = $false
@@ -786,8 +881,10 @@ $buttonRemote.Add_Click({
                         
                     } else {
                         # Method 2: Use expect-like functionality with PowerShell and SSH
+                        Write-Host ""
                         Write-Host "  Using PowerShell SSH automation (plink not found)..."
-                        
+                        Write-Host ""
+
                         # Convert secure password to plain text only when needed for batch script
                         $plainPassword = $remoteCredential.GetNetworkCredential().Password
                         
@@ -815,6 +912,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         [System.GC]::Collect()
                         
                         if ($batchResult -match "SSH_SUCCESS") {
+                            Write-Host ""
                             Write-Host "  [SUCCESS] Password authentication successful!"
                             Write-Host ""
                             $authSuccess = $true
@@ -822,7 +920,9 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                             # Method 3: Try with sshpass if available (Windows Subsystem for Linux)
                             $sshpassTest = Get-Command sshpass -ErrorAction SilentlyContinue
                             if ($sshpassTest) {
+                                Write-Host ""
                                 Write-Host "  Trying with sshpass..."
+                                Write-Host ""
                                 
                                 # Use environment variable for password (more secure than command line)
                                 $plainPassword = $remoteCredential.GetNetworkCredential().Password
@@ -837,6 +937,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                 [System.GC]::Collect()
                                 
                                 if ($sshpassResult -match "SSH_SUCCESS") {
+                                    Write-Host ""
                                     Write-Host "  [SUCCESS] Password authentication successful with sshpass!"
                                     Write-Host ""
                                     $authSuccess = $true
@@ -844,6 +945,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                     $authSuccess = $false
                                 }
                             } else {
+                                Write-Host ""
                                 Write-Host "  [ERROR] Could not authenticate with available methods"
                                 Write-Host "  Output: $batchResult"
                                 $authSuccess = $false
@@ -853,6 +955,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                     
                     if ($authSuccess) {
                         # Now copy the SSH key for future passwordless authentication
+                        Write-Host ""
                         Write-Host "  [INFO] Setting up SSH key for passwordless authentication..."
                         Write-Host "  This will allow future connections without password prompts"
                         Write-Host ""
@@ -863,8 +966,10 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                             $publicKeyContent = Get-Content $sshPublicKeyPath -Raw
                             $publicKeyContent = $publicKeyContent.Trim()
                             
+                            Write-Host ""
                             Write-Host "  Copying SSH key to remote host..."
-                            
+                            Write-Host ""
+
                             # Use the same authentication method that worked for copying the key
                             if ($plinkPath) {
                                 # Use plink to copy the SSH key (securely)
@@ -926,6 +1031,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                             }
                             
                             if ($keyCopyResult -match "SSH_KEY_COPIED") {
+                                Write-Host ""
                                 Write-Host "  [SUCCESS] SSH key successfully copied to remote host!"
                                 Write-Host "  Future connections will not require password"
                                 Write-Host ""
@@ -936,20 +1042,28 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                 
                                 $finalTest = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'Passwordless SSH successful'" 2>&1
                                 if ($LASTEXITCODE -eq 0) {
+                                    Write-Host ""
                                     Write-Host "  [SUCCESS] Passwordless SSH authentication confirmed!"
                                     Write-Host "  Response: $finalTest"
+                                    Write-Host ""
                                 } else {
+                                    Write-Host ""
                                     Write-Host "  [INFO] Passwordless test not yet working, but key was copied"
                                     Write-Host "  This may take a moment to take effect on the remote system"
+                                    Write-Host ""
                                 }
                             } else {
+                                Write-Host ""
                                 Write-Host "  [WARNING] Failed to copy SSH key to remote host"
                                 Write-Host "  Password authentication will be required for future connections"
                                 Write-Host "  Details: $keyCopyResult"
+                                Write-Host ""
                             }
                         } else {
+                            Write-Host ""
                             Write-Host "  [ERROR] SSH public key not found at: $sshPublicKeyPath"
                             Write-Host "  Cannot set up passwordless authentication"
+                            Write-Host ""
                         }
                         
                         # Extract IP address and continue
@@ -960,7 +1074,9 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         $remoteCredential = $null
                         $securePassword = $null
                         [System.GC]::Collect()
+                        Write-Host ""
                         Write-Host "  [INFO] Credentials securely cleared from memory"
+                        Write-Host ""
                         
                     } else {
                         # Secure cleanup: Clear the credential object from memory even on failure
@@ -968,6 +1084,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         $securePassword = $null
                         [System.GC]::Collect()
                         
+                        Write-Host ""
                         Write-Host "  [ERROR] All password authentication methods failed"
                         Write-Host ""
                         Write-Host "  Troubleshooting suggestions:"
@@ -987,7 +1104,8 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         $securePassword = $null
                         [System.GC]::Collect()
                     }
-                    
+
+                    Write-Host ""
                     Write-Host "  [ERROR] Failed to test password authentication"
                     Write-Host "  Details: $($_.Exception.Message)"
                     Write-Host ""
@@ -996,6 +1114,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                 }
                 
             } else {
+                Write-Host ""
                 Write-Host "  [INFO] User cancelled password authentication"
                 Write-Host ""
                 # No credentials to clean up since user cancelled
@@ -1014,11 +1133,14 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
     
     try {
         if ($SSHEXITCODE -eq 0){
-        
+
+        Write-Host ""
         Write-Host "[INFO] Testing Docker availability on remote host..."
+        Write-Host ""
 
         $dockerTestResult = & ssh -o ConnectTimeout=10 $remoteHost "docker --version" 2>&1
-
+        
+        Write-Host ""
         Write-Host "[SUCCESS] Docker is available on remote host"
         Write-Host "  Version: $dockerTestResult"
         Write-Host ""
@@ -1049,7 +1171,7 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     Write-Host "  Location: LOCAL"
     Write-Host "  Mode: Local Docker containers"
     Write-Host ""
-    Write-Host "==================================="
+    Write-Host "========================================="
     Write-Host ""
 } elseif ($connectionResult -eq [System.Windows.Forms.DialogResult]::No -and $script:REMOTE_HOST_IP) {
     $CONTAINER_LOCATION = "REMOTE@$($script:REMOTE_HOST_IP)"
@@ -1086,6 +1208,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     
     try {
         # Scan for subdirectories on remote host
+        Write-Host ""
         Write-Host "    Scanning directory: $remoteRepoPath"
         Write-Host "    Using remote host: $remoteHost"
         Write-Host ""
@@ -1095,8 +1218,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             # Reconstruct the remote host from the IP we stored earlier
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Host ""
                 Write-Host "    [INFO] Reconstructed remote host: $remoteHost"
+                Write-Host ""
             } else {
+                Write-Host ""
                 Write-Host "    [ERROR] No remote host information available"
                 throw "Remote host configuration is missing"
             }
@@ -1105,10 +1231,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         $scanCommand = "find '$remoteRepoPath' -maxdepth 1 -type d -not -path '$remoteRepoPath' -exec basename {} \;"
         
         # Use the authenticated SSH connection
+        Write-Host ""
         Write-Host "    Executing: ssh $remoteHost '$scanCommand'"
+        Write-Host ""
         $availableFolders = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $scanCommand 2>&1
         
         if ($LASTEXITCODE -ne 0) {
+            Write-Host ""
             Write-Host "    [ERROR] Could not scan remote directory"
             Write-Host "    Command output: $availableFolders"
             Write-Host ""
@@ -1120,6 +1249,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         $folderList = $availableFolders -split "`n" | Where-Object { $_.Trim() -ne "" }
         
         if ($folderList.Count -eq 0) {
+            Write-Host ""
             Write-Host "    [ERROR] No subdirectories (and thus no simulation models) found in:"
             Write-Host "    $remoteRepoPath"
             Write-Host ""
@@ -1127,6 +1257,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             exit 1
         }
         
+        Write-Host ""
         Write-Host "    [SUCCESS] Found $($folderList.Count) repositories:"
         Write-Host ""
         foreach ($folder in $folderList) {
@@ -1135,6 +1266,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         Write-Host ""
         
     } catch {
+        Write-Host ""
         Write-Host "    [ERROR] Unexpected error while scanning remote repositories"
         Write-Host "    Error details: $($_.Exception.Message)"
         Write-Host ""
@@ -1151,7 +1283,6 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "    REPOSITORY SELECTION"
     Write-Host "========================================="
     Write-Host ""
-    
     Write-Host "    [INFO] Creating repository selection dialog..."
     Write-Host ""
     
@@ -1230,6 +1361,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
 
     # Process the selection
     if ($repoSelectionResult -eq [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host ""
         Write-Host "    [SUCCESS] Selected repository: $($script:SELECTED_REPO)"
         Write-Host "    Repository path: $remoteRepoPath/$($script:SELECTED_REPO)"
         Write-Host ""
@@ -1241,9 +1373,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         if ([string]::IsNullOrEmpty($remoteHost)) {
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Host ""
                 Write-Host "    [INFO] Using remote host: $remoteHost"
+                Write-Host ""
             } else {
+                Write-Host ""
                 Write-Host "    [ERROR] No remote host information available for verification"
+                Write-Host ""
             }
         }
         
@@ -1251,14 +1387,19 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         $gitCheckResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $gitCheckCommand 2>&1
         
         if ($gitCheckResult -match "Git repository found") {
+            Write-Host ""
             Write-Host "    [SUCCESS] Git repository found in selected folder"
+            Write-Host ""
         } else {
+            Write-Host ""
             Write-Host "    [WARNING] No .git directory found in selected folder"
             Write-Host "    This folder may not be a Git repository"
+            Write-Host ""
         }
         Write-Host ""
         
     } else {
+        Write-Host ""
         Write-Host "    [ERROR] User cancelled repository selection"
         Write-Host ""
         exit 1
@@ -1284,6 +1425,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     $script:REMOTE_REPO_PATH = "$remoteRepoPath/$($script:SELECTED_REPO)"
     
     # Verify Docker is available on remote host
+    Write-Host ""
     Write-Host "    [INFO] Checking remote Docker availability..."
     Write-Host ""
     try {
@@ -1291,23 +1433,31 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         if ([string]::IsNullOrEmpty($remoteHost)) {
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Host ""
                 Write-Host "    [INFO] Using remote host for Docker verification: $remoteHost"
+                Write-Host ""
             } else {
+                Write-Host ""
                 Write-Host "    [ERROR] No remote host information available for Docker verification"
+                Write-Host ""
                 exit 1
             }
         }
         
         $dockerVersion = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker --version" 2>&1
         if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
             Write-Host "    [SUCCESS] Docker is available on remote host"
             Write-Host "    Remote Docker version: $dockerVersion"
             Write-Host ""
             
             # Ensure Docker engine is running on remote host
+            Write-Host ""
             Write-Host "    [INFO] Checking remote Docker engine status..."
+            Write-Host ""
             & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
+                Write-Host ""
                 Write-Host "    [WARNING] Docker engine is not running on remote host"
                 Write-Host "    Attempting to start Docker service on Ubuntu 24.04..."
                 Write-Host ""
@@ -1315,44 +1465,64 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                 try {
                     # Try to start Docker service on Ubuntu (systemd)
                     # First, check if user can run Docker without sudo (is in docker group)
+                    Write-Host ""
                     Write-Host "    Checking if user can run Docker without sudo..."
+                    Write-Host ""
                     $dockerGroupCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "groups | grep -q docker && echo 'HAS_DOCKER_GROUP' || echo 'NO_DOCKER_GROUP'" 2>&1
                     
                     if ($dockerGroupCheck -match "HAS_DOCKER_GROUP") {
+                        Write-Host ""
                         Write-Host "    [INFO] User is in docker group, trying Docker without sudo..."
+                        Write-Host ""
                         # Try starting Docker service as regular user (if systemd allows)
                         $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "systemctl --user start docker || echo 'USER_START_FAILED'" 2>&1
                         if ($startResult -match "USER_START_FAILED") {
+                            Write-Host ""
                             Write-Host "    [INFO] User-level start failed, need system-level Docker service"
+                            Write-Host ""
                             $needsSudo = $true
                         } else {
+                            Write-Host ""
                             Write-Host "    [SUCCESS] Docker service started at user level"
+                            Write-Host ""
                             $needsSudo = $false
                         }
                     } else {
+                        Write-Host ""
                         Write-Host "    [INFO] User not in docker group, system-level service required"
+                        Write-Host ""
                         $needsSudo = $true
                     }
                     
                     if ($needsSudo) {
+                        Write-Host ""
                         Write-Host "    [INFO] System-level Docker service management required"
                         Write-Host "    Checking sudo access for Docker service..."
-                        
+                        Write-Host ""
+
                         # Check if passwordless sudo is available for systemctl docker
                         $sudoCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo -n systemctl status docker >/dev/null 2>&1 && echo 'SUDO_OK' || echo 'SUDO_NEEDS_PASSWORD'" 2>&1
                         
                         if ($sudoCheck -match "SUDO_OK") {
+                            Write-Host ""
                             Write-Host "    [SUCCESS] Passwordless sudo available for Docker service"
+                            Write-Host ""
                             $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo systemctl start docker" 2>&1
                             if ($LASTEXITCODE -eq 0) {
+                                Write-Host ""
                                 Write-Host "    [SUCCESS] Docker service started via sudo"
+                                Write-Host ""
                             } else {
+                                Write-Host ""
                                 Write-Host "    [WARNING] Could not start Docker service via sudo: $startResult"
+                                Write-Host ""
                             }
                         } else {
+                            Write-Host ""
                             Write-Host "    [WARNING] Sudo requires password for Docker service management"
                             Write-Host "    Cannot start Docker service automatically via SSH batch mode"
-                            
+                            Write-Host ""
+
                             # Provide user with manual instructions
                             [System.Windows.Forms.MessageBox]::Show(
                                 "Docker service needs to be started on the remote host, but sudo requires a password.`n`n" +
@@ -1371,7 +1541,9 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     }
                     
                     # Wait for Docker daemon to start with progress indication
+                    Write-Host ""
                     Write-Host "    Waiting for remote Docker daemon to initialize..."
+                    Write-Host ""
                     $maxAttempts = 30  # 30 seconds max wait
                     $attempt = 0
                     
@@ -1390,9 +1562,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                         # Show different messages at different intervals
                         if ($attempt -eq 10) {
+                            Write-Host ""
                             Write-Host "    [INFO] Remote Docker is still starting up (this may take a moment)..."
+                            Write-Host ""
                         } elseif ($attempt -eq 20) {
+                            Write-Host ""
                             Write-Host "    [INFO] Still waiting for remote Docker daemon (almost ready)..."
+                            Write-Host ""
                         }
                         
                     } while ($attempt -lt $maxAttempts)
@@ -1400,9 +1576,12 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     # Final check
                     & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
                     if ($LASTEXITCODE -eq 0) {
+                        Write-Host ""
                         Write-Host "    [SUCCESS] Remote Docker engine started successfully!"
                         Write-Host "    Startup time: $attempt seconds"
+                        Write-Host ""
                     } else {
+                        Write-Host ""
                         Write-Host "    [WARNING] Remote Docker engine did not start within $maxAttempts seconds"
                         Write-Host "    Please check Docker service on remote host manually"
                         Write-Host ""
@@ -1416,26 +1595,35 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         )
                         
                         if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+                            Write-Host ""
                             Write-Host "    [INFO] Please start Docker on remote host manually"
+                            Write-Host ""
                             [System.Windows.Forms.MessageBox]::Show("Please start Docker on the remote host manually:`n`nsudo systemctl start docker`nsudo systemctl enable docker`n`nThen click OK to continue.", "Manual Start Required", "OK", "Information")
                         } elseif ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                            Write-Host ""
                             Write-Host "    [INFO] User chose to exit"
+                            Write-Host ""
                             exit 1
                         }
                         # If Yes is chosen, continue with warning
                     }
                     
                 } catch {
+                    Write-Host ""
                     Write-Host "    [ERROR] Failed to start remote Docker service"
                     Write-Host "    Error: $($_.Exception.Message)"
                     Write-Host "    Please start Docker on remote host manually"
+                    Write-Host ""
                 }
                 
             } else {
+                Write-Host ""
                 Write-Host "    [SUCCESS] Remote Docker engine is running"
+                Write-Host ""
             }
             Write-Host ""
         } else {
+            Write-Host ""
             Write-Host "    [ERROR] Docker is not available on remote host"
             Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("Docker is not available on the remote host.`n`nPlease install and configure Docker on Ubuntu 24.04:`n`n" +
@@ -1449,6 +1637,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             exit 1
         }
     } catch {
+        Write-Host ""
         Write-Host "    [ERROR] Could not check remote Docker availability"
         Write-Host "    Error details: $($_.Exception.Message)"
         Write-Host ""
@@ -1459,7 +1648,9 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     # Create/use a REMOTE Docker context over SSH
     # Requires SSH access to a host that already has a Docker Engine running (Ubuntu 24.04)
     # The remote host uses Unix socket: unix:///var/run/docker.sock
+    Write-Host ""
     Write-Host "    [INFO] Configuring Docker context for remote Ubuntu 24.04 host..."
+    Write-Host ""
 
     $RemoteContextName = "php_workstation"  # Name for the Docker context
 
@@ -1467,9 +1658,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     if ([string]::IsNullOrEmpty($remoteHost)) {
         if ($script:REMOTE_HOST_IP) {
             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            Write-Host ""
             Write-Host "    [INFO] Using remote host for Docker context: $remoteHost"
+            Write-Host ""
         } else {
+            Write-Host ""
             Write-Host "    [ERROR] No remote host information available for Docker context"
+            Write-Host ""
             exit 1
         }
     }
@@ -2192,7 +2387,7 @@ $formContainer.CancelButton = $buttonCancel
 # Event handlers
 $buttonStart.Add_Click({
     Write-Host ""
-    Write-Host "[INFO] Start button clicked"
+    Write-Host "[INFO] Container is starting up..."
     Write-Host "  Container: $CONTAINER_NAME"
     
     # Get options from form
@@ -2328,17 +2523,21 @@ $buttonStart.Add_Click({
         # Build the Docker image
         Write-Host "[INFO] Building Docker image '$DockerImageName'..."
         Write-Host "This may take several minutes depending on the image size and dependencies..."
+        Write-Host ""
 
         try {
             # Start timing the build process
             $buildStartTime = Get-Date
             Write-Host "[INFO] Docker build started at $(Get-Date -Format 'HH:mm:ss')"
+            Write-Host ""
             Write-Host "[INFO] This process may take 5-15 minutes depending on your system and network speed..."
+            Write-Host ""
             Write-Host "[INFO] Build output will be shown below (this indicates progress):"
             Write-Host ("=" * 80)
 
             if ($CONTAINER_LOCATION -eq "LOCAL") { 
                 # Local build with real-time output using direct execution
+                Write-Host ""
                 Write-Host "[BUILD] Starting local Docker build..."
                 Write-Host ""
 
@@ -2358,9 +2557,13 @@ $buttonStart.Add_Click({
                     Stop-Spinner
                     
                     if ($buildSuccess) {
+                        Write-Host ""
                         Write-Host " [SUCCESS]" -ForegroundColor Green
+                        Write-Host ""
                     } else {
+                        Write-Host ""
                         Write-Host " [FAILED]" -ForegroundColor Red
+                        Write-Host ""
                     }
                     Write-Host ""
 
@@ -2386,7 +2589,9 @@ $buttonStart.Add_Click({
 
             } else {
                 # Remote build with real-time output via SSH
+                Write-Host ""
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
+                Write-Host ""
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                 $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
                 Write-Host ""
@@ -2399,15 +2604,20 @@ $buttonStart.Add_Click({
                     # Execute SSH command directly and show output in real-time
                     $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$buildCommand`""
                     Write-Host "[DEBUG] SSH command: $sshCommand"
+                    Write-Host ""
 
                     $buildResult = & cmd /c $sshCommand '2>&1'
                     $buildSuccess = $LASTEXITCODE -eq 0
                     Stop-Spinner
                     
                     if ($buildSuccess) {
+                        Write-Host ""
                         Write-Host " [SUCCESS]" -ForegroundColor Green
+                        Write-Host ""
                     } else {
+                        Write-Host ""
                         Write-Host " [FAILED]" -ForegroundColor Red
+                        Write-Host ""
                     }
                     Write-Host ""
 
@@ -2421,6 +2631,7 @@ $buttonStart.Add_Click({
                     }
                 } catch {
                     Stop-Spinner
+                    Write-Host ""
                     Write-Host " [FAILED]" -ForegroundColor Red
                     Write-Host ""
                     Write-Host "[ERROR] Exception during remote Docker build: $($_.Exception.Message)"
@@ -2436,16 +2647,20 @@ $buttonStart.Add_Click({
             $totalElapsed = $buildEndTime - $buildStartTime
             Write-Host ("=" * 80)
             Write-Host "[INFO] Docker build completed at $(Get-Date -Format 'HH:mm:ss')"
+            Write-Host ""
             Write-Host "[INFO] Total build time: $("{0:mm\:ss}" -f $totalElapsed)"
+            Write-Host ""
 
             if ($buildSuccess) {
                 Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully!"
+                Write-Host ""
             } else {
                 Write-Host "[WARNING] Failed to build Docker image '$DockerImageName' on first attempt"
                 Write-Host "Build output:"
                 Write-Host $buildResult
                 Write-Host ""
                 Write-Host "[INFO] Attempting fallback: building prerequisite image first..."
+                Write-Host ""
 
                 # Determine prerequisite Dockerfile path and build context (this time docker_setup folder)
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
@@ -2458,6 +2673,7 @@ $buttonStart.Add_Click({
                 }
 
                 Write-Host "[INFO] Using prerequisite Dockerfile: $prereqDockerfilePath"
+                Write-Host ""
 
                 # Check if prerequisite Dockerfile exists
                 $prereqDockerfileExists = $false
@@ -2471,12 +2687,15 @@ $buttonStart.Add_Click({
                     }
                 } catch {
                     Write-Host "[ERROR] Could not check for prerequisite Dockerfile: $($_.Exception.Message)"
+                    Write-Host ""
                     $prereqDockerfileExists = $false
                 }
 
                 if ($prereqDockerfileExists) {
                     Write-Host "[INFO] Building prerequisite Docker image..."
+                    Write-Host ""
                     Write-Host "[INFO] This may take 3-10 minutes for the prerequisite image..."
+                    Write-Host ""
                     $prereqImageName = "$DockerImageName-prerequisite"
 
                     try {
@@ -2488,6 +2707,7 @@ $buttonStart.Add_Click({
                         if ($CONTAINER_LOCATION -eq "LOCAL") {
                             # Local build of prerequisite with real-time output
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image locally..."
+                            Write-Host ""
 
                             # Build the Docker command for prerequisite
                             $prereqCommand = "docker build -f `"$prereqDockerfilePath`" -t $prereqImageName --no-cache `"$prereqDockerContextPath`""
@@ -2497,6 +2717,7 @@ $buttonStart.Add_Click({
                             # Execute prerequisite build with spinner
                             Write-Host "[INFO] Building prerequisite image (this may take 5-15 minutes)..." -NoNewline
                             Start-Spinner -Message ""
+                            Write-Host ""
 
                             try {
                                 # Execute prerequisite build directly and show output in real-time
@@ -2505,9 +2726,13 @@ $buttonStart.Add_Click({
                                 Stop-Spinner
                                 
                                 if ($prereqBuildSuccess) {
+                                    Write-Host ""
                                     Write-Host " [SUCCESS]" -ForegroundColor Green
+                                    Write-Host ""
                                 } else {
+                                    Write-Host ""
                                     Write-Host " [FAILED]" -ForegroundColor Red
+                                    Write-Host ""
                                 }
                                 Write-Host ""
 
@@ -2521,6 +2746,7 @@ $buttonStart.Add_Click({
                                 }
                             } catch {
                                 Stop-Spinner
+                                Write-Host ""
                                 Write-Host " [FAILED]" -ForegroundColor Red
                                 Write-Host ""
                                 Write-Host "[ERROR] Exception during prerequisite build: $($_.Exception.Message)"
@@ -2533,6 +2759,7 @@ $buttonStart.Add_Click({
 
                         } else {
                             # Remote build of prerequisite with real-time output
+                            Write-Host ""
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
                             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                             $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache . 2>&1"
@@ -2552,9 +2779,13 @@ $buttonStart.Add_Click({
                                 Stop-Spinner
                                 
                                 if ($prereqBuildSuccess) {
+                                    Write-Host ""
                                     Write-Host " [SUCCESS]" -ForegroundColor Green
+                                    Write-Host ""
                                 } else {
+                                    Write-Host ""
                                     Write-Host " [FAILED]" -ForegroundColor Red
+                                    Write-Host ""
                                 }
                                 Write-Host ""
 
@@ -2568,6 +2799,7 @@ $buttonStart.Add_Click({
                                 }
                             } catch {
                                 Stop-Spinner
+                                Write-Host ""
                                 Write-Host " [FAILED]" -ForegroundColor Red
                                 Write-Host ""
                                 Write-Host "[ERROR] Exception during remote prerequisite build: $($_.Exception.Message)"
@@ -2583,6 +2815,7 @@ $buttonStart.Add_Click({
                         $prereqElapsed = $prereqEndTime - $prereqStartTime
                         Write-Host ("=" * 60)
                         Write-Host "[DOCKER-PREREQ] Prerequisite build completed in $("{0:mm\:ss}" -f $prereqElapsed)"
+                        Write-Host ""
 
                         if ($prereqBuildSuccess) {
                             Write-Host "[SUCCESS] Prerequisite image built successfully! Retrying main image build..."
@@ -2592,12 +2825,14 @@ $buttonStart.Add_Click({
                                 # Start timing the retry build
                                 $retryStartTime = Get-Date
                                 Write-Host "[DOCKER-RETRY] Main image retry build started at $(Get-Date -Format 'HH:mm:ss')"
+                                Write-Host ""
                                 Write-Host "[DOCKER-RETRY] This should be faster now that prerequisite is built..."
                                 Write-Host ("=" * 60)
 
                                 if ($CONTAINER_LOCATION -eq "LOCAL") {
                                     # Local build retry with real-time output
                                     Write-Host "[DOCKER-RETRY] Retrying main image build locally..."
+                                    Write-Host ""
 
                                     # Build the Docker command for retry
                                     $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
@@ -2605,6 +2840,7 @@ $buttonStart.Add_Click({
                                     Write-Host ""
 
                                     # Execute retry build with spinner
+                                    Write-Host ""
                                     Write-Host "[INFO] Retrying main image build (should be faster with prerequisite)..." -NoNewline
                                     Start-Spinner -Message ""
 
@@ -2615,9 +2851,13 @@ $buttonStart.Add_Click({
                                         Stop-Spinner
                                         
                                         if ($retryBuildSuccess) {
+                                            Write-Host ""
                                             Write-Host " [SUCCESS]" -ForegroundColor Green
+                                            Write-Host ""
                                         } else {
+                                            Write-Host ""
                                             Write-Host " [FAILED]" -ForegroundColor Red
+                                            Write-Host ""
                                         }
                                         Write-Host ""
 
@@ -2631,6 +2871,7 @@ $buttonStart.Add_Click({
                                         }
                                     } catch {
                                         Stop-Spinner
+                                        Write-Host ""
                                         Write-Host " [FAILED]" -ForegroundColor Red
                                         Write-Host ""
                                         Write-Host "[ERROR] Exception during retry build: $($_.Exception.Message)"
@@ -2649,12 +2890,14 @@ $buttonStart.Add_Click({
                                     Write-Host ""
 
                                     # Execute remote retry build with spinner
+                                    Write-Host ""
                                     Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -NoNewline
                                     Start-Spinner -Message ""
 
                                     try {
                                         # Execute SSH retry command directly and show output in real-time
                                         $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$retryBuildCommand`""
+                                        Write-Host ""
                                         Write-Host "[DEBUG] SSH retry command: $retrySSHCommand"
 
                                         $retryBuildResult = & cmd /c $retrySSHCommand '2>&1'
@@ -2662,9 +2905,13 @@ $buttonStart.Add_Click({
                                         Stop-Spinner
                                         
                                         if ($retryBuildSuccess) {
+                                            Write-Host ""
                                             Write-Host " [SUCCESS]" -ForegroundColor Green
+                                            Write-Host ""
                                         } else {
+                                            Write-Host ""
                                             Write-Host " [FAILED]" -ForegroundColor Red
+                                            Write-Host ""
                                         }
                                         Write-Host ""
 
@@ -2678,6 +2925,7 @@ $buttonStart.Add_Click({
                                         }
                                     } catch {
                                         Stop-Spinner
+                                        Write-Host ""
                                         Write-Host " [FAILED]" -ForegroundColor Red
                                         Write-Host ""
                                         Write-Host "[ERROR] Exception during remote retry build: $($_.Exception.Message)"
@@ -2695,34 +2943,43 @@ $buttonStart.Add_Click({
                                 Write-Host "[DOCKER-RETRY] Retry build completed in $("{0:mm\:ss}" -f $retryElapsed)"
 
                                 if ($retryBuildSuccess) {
+                                    Write-Host ""
                                     Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully after prerequisite build!"
                                 } else {
+                                    Write-Host ""
                                     Write-Host "[ERROR] Failed to build Docker image '$DockerImageName' even after building prerequisite"
+                                    Write-Host ""
                                     Write-Host "Retry build output:"
                                     Write-Host $retryBuildResult
                                     Exit 1
                                 }
                             } catch {
+                                Write-Host ""
                                 Write-Host "[ERROR] Exception occurred during retry build: $($_.Exception.Message)"
                                 Exit 1
                             }
                         } else {
                             Write-Host "[ERROR] Failed to build prerequisite Docker image"
+                            Write-Host ""
                             Write-Host "Prerequisite build output:"
                             Write-Host $prereqBuildResult
                             Exit 1
                         }
                     } catch {
+                        Write-Host ""
                         Write-Host "[ERROR] Exception occurred while building prerequisite image: $($_.Exception.Message)"
                         Exit 1
                     }
                 } else {
+                    Write-Host ""
                     Write-Host "[ERROR] Prerequisite Dockerfile not found at: $prereqDockerfilePath"
+                    Write-Host ""
                     Write-Host "[FATAL ERROR] Cannot build Docker image - both main and prerequisite Dockerfiles failed"
                     Exit 1
                 }
             }
         } catch {
+            Write-Host ""
             Write-Host "[ERROR] Exception occurred while building Docker image: $($_.Exception.Message)"
             Exit 1
         }
@@ -2758,12 +3015,13 @@ $buttonStart.Add_Click({
     $ProjectRoot = $ProjectRoot -replace '\\', '/'
 
     # Call the function passing $ProjectRoot
-    $outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
-    $synthpopDir  = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
+    $outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot | Out-Null
+    $synthpopDir  = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot | Out-Null
 
     # Validate or create output directory
     if (-not (Test-AndCreateDirectory -Path $outputDir -PathKey "output_dir")) {
         Write-Host "[FATAL ERROR] Failed to create output directory: $outputDir"
+        Write-Host ""
         Write-Host "Please check your sim_design.yaml file and ensure the path is valid."
         Exit 1
     }
@@ -2771,12 +3029,17 @@ $buttonStart.Add_Click({
     # Validate or create synthpop directory
     if (-not (Test-AndCreateDirectory -Path $synthpopDir -PathKey "synthpop_dir")) {
         Write-Host "[FATAL ERROR] Failed to create synthpop directory: $synthpopDir"
+        Write-Host ""
         Write-Host "Please check your sim_design.yaml file and ensure the path is valid."
         Exit 1
     }
 
-    Write-Host "[INFO] Mounting output_dir to container ($CONTAINER_NAME):    $outputDir"       # Keep using forward slashes for Docker mounts
-    Write-Host "[INFO] Mounting synthpop_dir to container ($CONTAINER_NAME):  $synthpopDir"      # Keep using forward slashes for Docker mounts
+    Write-Host "[INFO] Mounting output_dir to container ($CONTAINER_NAME):    $outputDir"
+    Write-Host ""
+    Write-Host ""       # Keep using forward slashes for Docker mounts
+    Write-Host "[INFO] Mounting synthpop_dir to container ($CONTAINER_NAME):  $synthpopDir"
+    Write-Host ""
+    Write-Host ""       # Keep using forward slashes for Docker mounts
 
     #-------------------------------------#
     #   Run the actual Docker container   #
@@ -2949,18 +3212,22 @@ RUN apk add --no-cache rsync
 
     } else {
         Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..."
+        Write-Host ""
 
         # Configure Docker arguments based on execution location (LOCAL vs REMOTE)
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             Write-Host "[INFO] Configuring Docker arguments for LOCAL Windows execution..."
-            
+            Write-Host ""
+
             # Convert paths for Docker bind mount (Windows to WSL format)
             $DockerOutputDir = Convert-PathToDockerFormat -Path $outputDir
             $DockerSynthpopDir = Convert-PathToDockerFormat -Path $synthpopDir
             
             Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
+            Write-Host ""
             Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
-            
+            Write-Host ""
+
             # Configure SSH key paths for Windows
             $sshKeyPath = "${HOME}\.ssh\id_ed25519_${USERNAME}"
             $knownHostsPath = "${HOME}\.ssh\known_hosts"
@@ -2978,8 +3245,8 @@ RUN apk add --no-cache rsync
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts
-                "--mount", "type=bind,source=$DockerOutputDir,target=/output",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/IMPACTncd_Germany/output",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/IMPACTncd_Germany/synthpop",
                 # SSH key and known_hosts for git access (Windows paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
@@ -2990,13 +3257,16 @@ RUN apk add --no-cache rsync
             
         } else {
             Write-Host "[INFO] Configuring Docker arguments for REMOTE Linux execution..."
-            
+            Write-Host ""
+
             # For remote execution, paths are already in Unix format
             $DockerOutputDir = $outputDir
             $DockerSynthpopDir = $synthpopDir
             
             Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
+            Write-Host ""
             Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
+            Write-Host ""
             
             # Configure SSH key paths for Linux (remote host)
             $sshKeyPath = "/home/php-workstation/.ssh/id_ed25519_${USERNAME}"
@@ -3015,8 +3285,8 @@ RUN apk add --no-cache rsync
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts (Unix paths)
-                "--mount", "type=bind,source=$DockerOutputDir,target=/output",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/IMPACTncd_Germany/output",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/IMPACTncd_Germany/synthpop",
                 # SSH key and known_hosts for git access (Linux paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
@@ -3030,17 +3300,21 @@ RUN apk add --no-cache rsync
         $dockerArgs += $DockerImageName
 
         # Execute docker with the arguments array
+        Write-Host ""
         Write-Host "[INFO] Starting RStudio Server container..."
+        Write-Host ""
         & docker $dockerArgs
         Write-Host ""
         Write-Host ""
         
         if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
             Write-Host "[SUCCESS] RStudio Server container started successfully!"
             Write-Host ""
             
             # Wait a moment for the container to fully start
             Write-Host "[INFO] Waiting for RStudio Server to initialize..."
+            Write-Host ""
             Start-Sleep -Seconds 3
             
             # Check if container is still running
@@ -3072,25 +3346,32 @@ RUN apk add --no-cache rsync
                 $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION`nVolumes: Disabled"
                 
             } else {
+                Write-Host ""
                 Write-Host "[WARNING] Container may have exited. Checking logs..."
+                Write-Host ""
                 $containerLogs = & docker logs $CONTAINER_NAME 2>&1
                 Write-Host "[ERROR] Container logs:"
                 Write-Host $containerLogs
                 
                 # Container failed to start properly - keep start button enabled
+                Write-Host ""
                 Write-Host "[ERROR] Container failed to start properly. Please check the logs above."
             }
         } else {
+            Write-Host ""
             Write-Host "[ERROR] Failed to start RStudio Server container"
+            Write-Host ""
             Write-Host "Exit code: $LASTEXITCODE"
+            Write-Host ""
             Write-Host "Execution location: $CONTAINER_LOCATION"
+            Write-Host ""
         }
     }
 })   
 
 $buttonStop.Add_Click({
     Write-Host ""
-    Write-Host "[INFO] Stop button clicked"
+    Write-Host "[INFO] Container is stopping..."
     Write-Host "  Container: $CONTAINER_NAME"
     Write-Host ""
     
@@ -3101,10 +3382,12 @@ $buttonStop.Add_Click({
     
     if ($containerRunning -and $containerRunning.Trim() -eq $CONTAINER_NAME) {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is running. Stopping..."
+        Write-Host ""
         
         try {
             # Stop the container gracefully
             Write-Host "[INFO] Attempting graceful shutdown (SIGTERM)..."
+            Write-Host ""
             & docker stop $CONTAINER_NAME 2>&1 | Out-Null
             
             if ($LASTEXITCODE -eq 0) {
@@ -3118,6 +3401,7 @@ $buttonStop.Add_Click({
                 $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
                     Write-Host "[SUCCESS] Container confirmed stopped."
+                    Write-Host ""
                     
                     if ($useVolumes) {
                         Write-Host ""
@@ -3169,10 +3453,12 @@ $buttonStop.Add_Click({
                     Write-Host ""
                     
                 } else {
+                    Write-Host ""
                     Write-Host "[WARNING] Container may still be running. Please check Docker Desktop$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' })."
                 }
                 
             } else {
+                Write-Host ""
                 Write-Host "[ERROR] Failed to stop container '$CONTAINER_NAME'"
                 Write-Host "[INFO] Attempting force stop..."
                 Write-Host ""
@@ -3180,11 +3466,13 @@ $buttonStop.Add_Click({
                 # Try force stop if graceful stop failed
                 & docker kill $CONTAINER_NAME 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
+                    Write-Host ""
                     Write-Host "[SUCCESS] Container '$CONTAINER_NAME' force stopped"
                     Write-Host ""
                     
                     # Handle volume cleanup for force stop too
                     if ($useVolumes) {
+                        Write-Host ""
                         Write-Host "[INFO] Force stopped - performing volume sync and cleanup..."
                         Write-Host ""
                         
@@ -3209,6 +3497,7 @@ $buttonStop.Add_Click({
                     $buttonStop.Enabled = $false
                     $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
                 } else {
+                    Write-Host ""
                     Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'"
                     Write-Host "[INFO] Please check Docker$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' }) and stop the container manually if needed"
                     Write-Host ""
@@ -3216,11 +3505,13 @@ $buttonStop.Add_Click({
             }
             
         } catch {
+            Write-Host ""
             Write-Host "[ERROR] Exception occurred while stopping container: $($_.Exception.Message)"
             [System.Windows.Forms.MessageBox]::Show("Error stopping container: $($_.Exception.Message)`n`nPlease check Docker Desktop and stop the container manually if needed.", "Container Stop Error", "OK", "Error")
         }
         
     } else {
+        Write-Host ""
         Write-Host "[INFO] Container '$CONTAINER_NAME' is not running"
         Write-Host "[INFO] No action needed - updating UI state"
         Write-Host ""
@@ -3236,11 +3527,13 @@ $buttonStop.Add_Click({
 })
 
 $buttonOK.Add_Click({
+    Write-Host ""
     Write-Host "[INFO] Container management dialog closed"
     $formContainer.Close()
 })
 
 # Show the container management dialog
+Write-Host ""
 Write-Host "Showing container management interface..."
 $containerResult = $formContainer.ShowDialog()
 
