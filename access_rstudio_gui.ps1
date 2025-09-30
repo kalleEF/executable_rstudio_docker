@@ -3015,11 +3015,8 @@ $buttonStart.Add_Click({
     # Get user identity information for non-root Docker execution
     # Note: On Windows, Docker Desktop runs containers in a Linux VM, so we use
     # default UID/GID (1000:1000) which works well for most cases
-    $UserId = "1000" #TODO: Check SSH user implementation to avoid root access? See ChatGPT suggestions.
-    $GroupId = "1000"
-    $UserName = $USERNAME
-    # Use a safe group name - if it conflicts, the entrypoint will create a fallback
-    $GroupName = "dockergroup"
+    $UserId = 1000 #TODO: Check SSH user implementation to avoid root access? See ChatGPT suggestions.
+    $GroupId = 1000
 
     # Define user-specific Docker volume names using sanitized username (only for output and synthpop)
     $VolumeOutput    = "impactncd_germany_output_$SafeCurrentUser"
@@ -3153,10 +3150,8 @@ RUN apk add --no-cache rsync
             "run", "-d", "--rm",     
             # User identity environment variables
             "--name", "$CONTAINER_NAME",
-            "-e", "USER_ID=$UserId",
-            "-e", "GROUP_ID=$GroupId", 
-            "-e", "USER_NAME=$UserName",
-            "-e", "GROUP_NAME=$GroupName",
+            "-e", "USERID=$UserId",
+            "-e", "GROUPID=$GroupId",
             "-e", "PASSWORD=$PASSWORD",
             "-e", "DISABLE_AUTH=false",
             # Port mapping with override support
@@ -3259,10 +3254,8 @@ RUN apk add --no-cache rsync
                 "run", "-d", "--rm",     
                 # User identity environment variables
                 "--name", "$CONTAINER_NAME",
-                "-e", "USER_ID=$UserId",
-                "-e", "GROUP_ID=$GroupId", 
-                "-e", "USER_NAME=$UserName",
-                "-e", "GROUP_NAME=$GroupName",
+                "-e", "USERID=$UserId",
+                "-e", "GROUPID=$GroupId",
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
                 # Port mapping with override support
@@ -3299,10 +3292,8 @@ RUN apk add --no-cache rsync
                 "run", "-d", "--rm",     
                 # User identity environment variables
                 "--name", "$CONTAINER_NAME",
-                "-e", "USER_ID=$UserId",
-                "-e", "GROUP_ID=$GroupId", 
-                "-e", "USER_NAME=$UserName",
-                "-e", "GROUP_NAME=$GroupName",
+                "-e", "USERID=$UserId",
+                "-e", "GROUPID=$GroupId",
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
                 # Port mapping with override support
