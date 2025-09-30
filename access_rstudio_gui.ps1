@@ -65,8 +65,22 @@ if (-not $isAdmin) {
     }
 } else {
     Write-Host ""
-    Write-Host "[SUCCESS] Running with Administrator privileges"
+    Write-Host "[SUCCESS] Running with Administrator privileges" -ForegroundColor Green
     Write-Host ""
+}
+
+#--------------------------------------#
+#   TERMINAL COLOR CONFIGURATION       #
+#--------------------------------------#
+
+# Set terminal background to black and configure color scheme
+try {
+    $Host.UI.RawUI.BackgroundColor = "Black"
+    $Host.UI.RawUI.ForegroundColor = "White"
+    Clear-Host
+} catch {
+    # Fallback if terminal doesn't support color changes
+    Write-Host "Note: Terminal color configuration not supported on this system" -ForegroundColor Yellow
 }
 
 #--------------------------------------#
@@ -306,14 +320,14 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     # Validate that USERNAME is not empty after normalization
     if ([string]::IsNullOrWhiteSpace($USERNAME)) {
         Write-Host ""
-        Write-Host "[ERROR] Username became empty after normalization"
+        Write-Host "[ERROR] Username became empty after normalization" -ForegroundColor Red
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show('Username cannot be empty after removing spaces.', 'Invalid Username', 'OK', 'Error')
         exit 1
     }
     
     Write-Host ""
-    Write-Host "[SUCCESS] Credentials collected successfully"
+    Write-Host "[SUCCESS] Credentials collected successfully" -ForegroundColor Green
     if ($originalUsername -ne $USERNAME) {
         Write-Host "  Original Username: $originalUsername"
         Write-Host "  Normalized Username: $USERNAME (spaces removed, lowercase)"
@@ -324,7 +338,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     Write-Host ""
 } else {
     Write-Host ""
-    Write-Host "[ERROR] User cancelled the dialog - no credentials provided"
+    Write-Host "[ERROR] User cancelled the dialog - no credentials provided" -ForegroundColor Red -ForegroundColor Red
     Write-Host ""
     exit 0
 }
@@ -348,7 +362,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 
     # Check if SSH key already exists
     if ((Test-Path $sshKeyPath) -and (Test-Path $sshPublicKeyPath)) {
-        Write-Host "[INFO] SSH key already exists"
+        Write-Host "[INFO] SSH key already exists" -ForegroundColor Cyan
         Write-Host "  Location: $sshKeyPath"
         Write-Host ""
 
@@ -370,7 +384,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 
     } else {
 
-        Write-Host "[INFO] Generating new SSH key for Docker operations..."
+        Write-Host "[INFO] Generating new SSH key for Docker operations..." -ForegroundColor Cyan
         Write-Host ""
         
         # Ensure .ssh directory exists
@@ -404,7 +418,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             $keyGenResult = $LASTEXITCODE
         } catch {
             Write-Host ""
-            Write-Host "  [ERROR] ssh-keygen execution failed: $($_.Exception.Message)"
+            Write-Host "  [ERROR] ssh-keygen execution failed: $($_.Exception.Message)" -ForegroundColor Red
             Write-Host ""
             $keyGenResult = 1
         }
@@ -412,13 +426,13 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         # Check if SSH key generation was successful
         if ($keyGenResult -eq 0 -and (Test-Path "$HOME\.ssh\id_ed25519_$USERNAME.pub")) {
             Write-Host ""
-            Write-Host "[SUCCESS] New SSH key generated successfully!"
+            Write-Host "[SUCCESS] New SSH key generated successfully!" -ForegroundColor Green
             Write-Host "  Private key: $HOME\.ssh\id_ed25519_$USERNAME"
             Write-Host "  Public key: $HOME\.ssh\id_ed25519_$USERNAME.pub"
             Write-Host ""
         } else {
             Write-Host ""
-            Write-Host "[ERROR] Failed to generate new SSH key!"
+            Write-Host "[ERROR] Failed to generate new SSH key!" -ForegroundColor Red
             Write-Host "  Exit code: $keyGenResult"
             Write-Host "  Expected public key at: $HOME\.ssh\id_ed25519_$USERNAME.pub"
             Write-Host ""
@@ -427,11 +441,11 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         
         if (Test-Path $sshPublicKeyPath) {
             Write-Host ""
-            Write-Host "[SUCCESS] Failsafe check: SSH key generated successfully!"
+            Write-Host "[SUCCESS] Failsafe check: SSH key generated successfully!" -ForegroundColor Green
             Write-Host ""
         } else {
             Write-Host ""
-            Write-Host "[ERROR] Failed to generate SSH key!"
+            Write-Host "[ERROR] Failed to generate SSH key!" -ForegroundColor Red
             Write-Host ""
             exit 1
         }
@@ -450,11 +464,11 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         try {
             $publicKey | Set-Clipboard | Out-Null
             Write-Host ""
-            Write-Host "[SUCCESS] Public key copied to clipboard!"
+            Write-Host "[SUCCESS] Public key copied to clipboard!" -ForegroundColor Green
             Write-Host ""
         } catch {
             Write-Host ""
-            Write-Host "[WARNING] Could not copy to clipboard, but key will be displayed."
+            Write-Host "[WARNING] Could not copy to clipboard, but key will be displayed." -ForegroundColor Yellow
             Write-Host ""
         }
 
@@ -605,7 +619,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     # Start and configure ssh-agent
     try {
         Write-Host ""
-        Write-Host "[INFO] Configuring SSH agent..."
+        Write-Host "[INFO] Configuring SSH agent..." -ForegroundColor Cyan
         Write-Host ""
         
         # Start ssh-agent service if not running
@@ -625,7 +639,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         
     } catch {
         Write-Host ""
-        Write-Host "[WARNING] Could not configure SSH agent. Key may still work for GitHub."
+        Write-Host "[WARNING] Could not configure SSH agent. Key may still work for GitHub." -ForegroundColor Yellow
         Write-Host ""
     }
     
@@ -710,7 +724,7 @@ $buttonRemote.Add_Click({
     Write-Host "Configuring for remote Docker containers..."
     Write-Host ""
     Write-Host ""
-    Write-Host "[INFO] Testing SSH connection to remote workstation..."
+    Write-Host "[INFO] Testing SSH connection to remote workstation..." -ForegroundColor Cyan
     Write-Host ""
     
     # Define remote host (update this IP address to match your workstation)
@@ -724,7 +738,7 @@ $buttonRemote.Add_Click({
         
         # First, try SSH key authentication (no password needed)
         Write-Host ""
-        Write-Host "  [INFO] Testing SSH key authentication..."
+        Write-Host "  [INFO] Testing SSH key authentication..." -ForegroundColor Cyan
         Write-Host ""
         $sshTestResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
         
@@ -732,7 +746,7 @@ $buttonRemote.Add_Click({
 
         if ($SSHEXITCODE -eq 0) {
             Write-Host ""
-            Write-Host "  [SUCCESS] SSH key authentication successful!"
+            Write-Host "  [SUCCESS] SSH key authentication successful!" -ForegroundColor Green
             Write-Host "  Response: $sshTestResult"
             Write-Host "  Remote workstation is reachable"
             Write-Host ""
@@ -743,7 +757,7 @@ $buttonRemote.Add_Click({
             
         } else {
             Write-Host ""
-            Write-Host "  [INFO] SSH key authentication failed - password authentication required"
+            Write-Host "  [INFO] SSH key authentication failed - password authentication required" -ForegroundColor Cyan
             Write-Host "  This is normal for first-time connections"
             Write-Host ""
             
@@ -816,7 +830,7 @@ $buttonRemote.Add_Click({
             if ($passwordResult -eq [System.Windows.Forms.DialogResult]::OK) {
                 # Secure password handling: Convert to SecureString immediately
                 Write-Host ""
-                Write-Host "  [INFO] Password provided, securing credentials..."
+                Write-Host "  [INFO] Password provided, securing credentials..." -ForegroundColor Cyan
                 Write-Host ""
                 $securePassword = ConvertTo-SecureString $textRemotePassword.Text -AsPlainText -Force
                 
@@ -840,13 +854,13 @@ $buttonRemote.Add_Click({
                 $formPassword.Dispose()
                 
                 Write-Host ""
-                Write-Host "  [INFO] Credentials secured, testing connection..."
+                Write-Host "  [INFO] Credentials secured, testing connection..." -ForegroundColor Cyan
                 Write-Host ""
                 
                 # Test connection with password using a more reliable method
                 try {
                     Write-Host ""
-                    Write-Host "  [INFO] Testing SSH connection with password..."
+                    Write-Host "  [INFO] Testing SSH connection with password..." -ForegroundColor Cyan
                     Write-Host ""
 
                     # Method 1: Try using plink (PuTTY's command line tool) if available
@@ -869,12 +883,12 @@ $buttonRemote.Add_Click({
                         
                         if ($plinkResult -match "SSH_SUCCESS") {
                             Write-Host ""
-                            Write-Host "  [SUCCESS] Password authentication successful!"
+                            Write-Host "  [SUCCESS] Password authentication successful!" -ForegroundColor Green
                             Write-Host ""
                             $authSuccess = $true
                         } else {
                             Write-Host ""
-                            Write-Host "  [ERROR] Password authentication failed with plink"
+                            Write-Host "  [ERROR] Password authentication failed with plink" -ForegroundColor Red
                             Write-Host "  Output: $plinkResult"
                             $authSuccess = $false
                         }
@@ -913,7 +927,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         
                         if ($batchResult -match "SSH_SUCCESS") {
                             Write-Host ""
-                            Write-Host "  [SUCCESS] Password authentication successful!"
+                            Write-Host "  [SUCCESS] Password authentication successful!" -ForegroundColor Green
                             Write-Host ""
                             $authSuccess = $true
                         } else {
@@ -938,7 +952,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                 
                                 if ($sshpassResult -match "SSH_SUCCESS") {
                                     Write-Host ""
-                                    Write-Host "  [SUCCESS] Password authentication successful with sshpass!"
+                                    Write-Host "  [SUCCESS] Password authentication successful with sshpass!" -ForegroundColor Green
                                     Write-Host ""
                                     $authSuccess = $true
                                 } else {
@@ -946,7 +960,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                 }
                             } else {
                                 Write-Host ""
-                                Write-Host "  [ERROR] Could not authenticate with available methods"
+                                Write-Host "  [ERROR] Could not authenticate with available methods" -ForegroundColor Red
                                 Write-Host "  Output: $batchResult"
                                 $authSuccess = $false
                             }
@@ -956,7 +970,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                     if ($authSuccess) {
                         # Now copy the SSH key for future passwordless authentication
                         Write-Host ""
-                        Write-Host "  [INFO] Setting up SSH key for passwordless authentication..."
+                        Write-Host "  [INFO] Setting up SSH key for passwordless authentication..." -ForegroundColor Cyan
                         Write-Host "  This will allow future connections without password prompts"
                         Write-Host ""
                         
@@ -1032,36 +1046,36 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                             
                             if ($keyCopyResult -match "SSH_KEY_COPIED") {
                                 Write-Host ""
-                                Write-Host "  [SUCCESS] SSH key successfully copied to remote host!"
+                                Write-Host "  [SUCCESS] SSH key successfully copied to remote host!" -ForegroundColor Green
                                 Write-Host "  Future connections will not require password"
                                 Write-Host ""
                                 
                                 # Test passwordless connection
-                                Write-Host "  [INFO] Testing passwordless SSH connection..."
+                                Write-Host "  [INFO] Testing passwordless SSH connection..." -ForegroundColor Cyan
                                 Start-Sleep -Seconds 2  # Give the remote system a moment to process the key
                                 
                                 $finalTest = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'Passwordless SSH successful'" 2>&1
                                 if ($LASTEXITCODE -eq 0) {
                                     Write-Host ""
-                                    Write-Host "  [SUCCESS] Passwordless SSH authentication confirmed!"
+                                    Write-Host "  [SUCCESS] Passwordless SSH authentication confirmed!" -ForegroundColor Green
                                     Write-Host "  Response: $finalTest"
                                     Write-Host ""
                                 } else {
                                     Write-Host ""
-                                    Write-Host "  [INFO] Passwordless test not yet working, but key was copied"
+                                    Write-Host "  [INFO] Passwordless test not yet working, but key was copied" -ForegroundColor Cyan
                                     Write-Host "  This may take a moment to take effect on the remote system"
                                     Write-Host ""
                                 }
                             } else {
                                 Write-Host ""
-                                Write-Host "  [WARNING] Failed to copy SSH key to remote host"
+                                Write-Host "  [WARNING] Failed to copy SSH key to remote host" -ForegroundColor Yellow
                                 Write-Host "  Password authentication will be required for future connections"
                                 Write-Host "  Details: $keyCopyResult"
                                 Write-Host ""
                             }
                         } else {
                             Write-Host ""
-                            Write-Host "  [ERROR] SSH public key not found at: $sshPublicKeyPath"
+                            Write-Host "  [ERROR] SSH public key not found at: $sshPublicKeyPath" -ForegroundColor Red
                             Write-Host "  Cannot set up passwordless authentication"
                             Write-Host ""
                         }
@@ -1075,7 +1089,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         $securePassword = $null
                         [System.GC]::Collect()
                         Write-Host ""
-                        Write-Host "  [INFO] Credentials securely cleared from memory"
+                        Write-Host "  [INFO] Credentials securely cleared from memory" -ForegroundColor Cyan
                         Write-Host ""
                         
                     } else {
@@ -1085,7 +1099,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         [System.GC]::Collect()
                         
                         Write-Host ""
-                        Write-Host "  [ERROR] All password authentication methods failed"
+                        Write-Host "  [ERROR] All password authentication methods failed" -ForegroundColor Red
                         Write-Host ""
                         Write-Host "  Troubleshooting suggestions:"
                         Write-Host "  1. Verify the password is correct"
@@ -1106,7 +1120,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                     }
 
                     Write-Host ""
-                    Write-Host "  [ERROR] Failed to test password authentication"
+                    Write-Host "  [ERROR] Failed to test password authentication" -ForegroundColor Red
                     Write-Host "  Details: $($_.Exception.Message)"
                     Write-Host ""
                     [System.Windows.Forms.MessageBox]::Show("Failed to test password authentication.`n`nError: $($_.Exception.Message)", "Connection Error", "OK", "Error")
@@ -1115,7 +1129,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                 
             } else {
                 Write-Host ""
-                Write-Host "  [INFO] User cancelled password authentication"
+                Write-Host "  [INFO] User cancelled password authentication" -ForegroundColor Cyan
                 Write-Host ""
                 # No credentials to clean up since user cancelled
                 return
@@ -1124,7 +1138,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
 
     } catch {
         Write-Host ""
-        Write-Host "[ERROR] Unexpected error during SSH connection test"
+        Write-Host "[ERROR] Unexpected error during SSH connection test" -ForegroundColor Red
         Write-Host "  Details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Unexpected error during remote connection test.`n`nError: $($_.Exception.Message)", "Connection Error", "OK", "Error")
@@ -1135,19 +1149,19 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
         if ($SSHEXITCODE -eq 0){
 
         Write-Host ""
-        Write-Host "[INFO] Testing Docker availability on remote host..."
+        Write-Host "[INFO] Testing Docker availability on remote host..." -ForegroundColor Cyan
         Write-Host ""
 
         $dockerTestResult = & ssh -o ConnectTimeout=10 $remoteHost "docker --version" 2>&1
         
         Write-Host ""
-        Write-Host "[SUCCESS] Docker is available on remote host"
+        Write-Host "[SUCCESS] Docker is available on remote host" -ForegroundColor Green
         Write-Host "  Version: $dockerTestResult"
         Write-Host ""
         }
     } catch {
         Write-Host ""
-        Write-Host "[ERROR] Docker unavailable on remote host"
+        Write-Host "[ERROR] Docker unavailable on remote host" -ForegroundColor Red
         Write-Host "  Host: $remoteHost"
         Write-Host "  Details: $($_.Exception.Message)"
         Write-Host ""
@@ -1167,7 +1181,7 @@ $connectionResult = $formConnection.ShowDialog()
 if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     $CONTAINER_LOCATION = "LOCAL"
     Write-Host ""
-    Write-Host "[SUCCESS] Container location configured"
+    Write-Host "[SUCCESS] Container location configured" -ForegroundColor Green
     Write-Host "  Location: LOCAL"
     Write-Host "  Mode: Local Docker containers"
     Write-Host ""
@@ -1175,14 +1189,14 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     Write-Host ""
 } elseif ($connectionResult -eq [System.Windows.Forms.DialogResult]::No -and $script:REMOTE_HOST_IP) {
     $CONTAINER_LOCATION = "REMOTE@$($script:REMOTE_HOST_IP)"
-    Write-Host "[SUCCESS] Container location configured"
+    Write-Host "[SUCCESS] Container location configured" -ForegroundColor Green
     Write-Host "  Location: REMOTE"
     Write-Host "  Target: $($script:REMOTE_HOST_IP)"
     Write-Host "  Mode: Remote Docker containers via SSH"
     Write-Host ""
 } else {
     Write-Host ""
-    Write-Host "[ERROR] Configuration failed"
+    Write-Host "[ERROR] Configuration failed" -ForegroundColor Red
     Write-Host "  Reason: Remote connection failed or user cancelled"
     Write-Host ""
     exit 1
@@ -1200,7 +1214,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "========================================="
     Write-Host ""
     
-    Write-Host "    [INFO] Scanning remote host for available repositories..."
+    Write-Host "    [INFO] Scanning remote host for available repositories..." -ForegroundColor Cyan
     
     # Define the base path on remote host where repositories are stored
     $remoteRepoPath = "/home/php-workstation/Schreibtisch/IMPACT/Models"
@@ -1219,11 +1233,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                 Write-Host ""
-                Write-Host "    [INFO] Reconstructed remote host: $remoteHost"
+                Write-Host "    [INFO] Reconstructed remote host: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
             } else {
                 Write-Host ""
-                Write-Host "    [ERROR] No remote host information available"
+                Write-Host "    [ERROR] No remote host information available" -ForegroundColor Red
                 throw "Remote host configuration is missing"
             }
         }
@@ -1238,7 +1252,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host ""
-            Write-Host "    [ERROR] Could not scan remote directory"
+            Write-Host "    [ERROR] Could not scan remote directory" -ForegroundColor Red
             Write-Host "    Command output: $availableFolders"
             Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("Could not scan remote directory: $remoteRepoPath`n`nPlease ensure the directory exists and is accessible.", "Remote Scan Error", "OK", "Error")
@@ -1250,7 +1264,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         if ($folderList.Count -eq 0) {
             Write-Host ""
-            Write-Host "    [ERROR] No subdirectories (and thus no simulation models) found in:"
+            Write-Host "    [ERROR] No subdirectories (and thus no simulation models) found in:" -ForegroundColor Red
             Write-Host "    $remoteRepoPath"
             Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("No subdirectories (and thus no simulation models) found in: $remoteRepoPath`n`nPlease ensure there are subdirectories containing your simulation models and their respective GitHub repositories.", "No Repositories Found", "OK", "Warning")
@@ -1258,7 +1272,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
         
         Write-Host ""
-        Write-Host "    [SUCCESS] Found $($folderList.Count) repositories:"
+        Write-Host "    [SUCCESS] Found $($folderList.Count) repositories:" -ForegroundColor Green
         Write-Host ""
         foreach ($folder in $folderList) {
             Write-Host "        - $folder"
@@ -1267,7 +1281,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
     } catch {
         Write-Host ""
-        Write-Host "    [ERROR] Unexpected error while scanning remote repositories"
+        Write-Host "    [ERROR] Unexpected error while scanning remote repositories" -ForegroundColor Red
         Write-Host "    Error details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Unexpected error while scanning remote for simulation models and repositories.`n`nError: $($_.Exception.Message)", "Scan Error", "OK", "Error")
@@ -1283,7 +1297,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "    REPOSITORY SELECTION"
     Write-Host "========================================="
     Write-Host ""
-    Write-Host "    [INFO] Creating repository selection dialog..."
+    Write-Host "    [INFO] Creating repository selection dialog..." -ForegroundColor Cyan
     Write-Host ""
     
     # Create repository selection form
@@ -1362,23 +1376,23 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     # Process the selection
     if ($repoSelectionResult -eq [System.Windows.Forms.DialogResult]::OK) {
         Write-Host ""
-        Write-Host "    [SUCCESS] Selected repository: $($script:SELECTED_REPO)"
+        Write-Host "    [SUCCESS] Selected repository: $($script:SELECTED_REPO)" -ForegroundColor Green
         Write-Host "    Repository path: $remoteRepoPath/$($script:SELECTED_REPO)"
         Write-Host ""
         
         # Verify the selected repository exists and contains a Git repository
-        Write-Host "    [INFO] Verifying selected repository..."
+        Write-Host "    [INFO] Verifying selected repository..." -ForegroundColor Cyan
         
         # Ensure we're using the correct remote host for verification
         if ([string]::IsNullOrEmpty($remoteHost)) {
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                 Write-Host ""
-                Write-Host "    [INFO] Using remote host: $remoteHost"
+                Write-Host "    [INFO] Using remote host: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
             } else {
                 Write-Host ""
-                Write-Host "    [ERROR] No remote host information available for verification"
+                Write-Host "    [ERROR] No remote host information available for verification" -ForegroundColor Red
                 Write-Host ""
             }
         }
@@ -1388,11 +1402,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         if ($gitCheckResult -match "Git repository found") {
             Write-Host ""
-            Write-Host "    [SUCCESS] Git repository found in selected folder"
+            Write-Host "    [SUCCESS] Git repository found in selected folder" -ForegroundColor Green
             Write-Host ""
         } else {
             Write-Host ""
-            Write-Host "    [WARNING] No .git directory found in selected folder"
+            Write-Host "    [WARNING] No .git directory found in selected folder" -ForegroundColor Yellow
             Write-Host "    This folder may not be a Git repository"
             Write-Host ""
         }
@@ -1400,7 +1414,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
     } else {
         Write-Host ""
-        Write-Host "    [ERROR] User cancelled repository selection"
+        Write-Host "    [ERROR] User cancelled repository selection" -ForegroundColor Red
         Write-Host ""
         exit 1
     }
@@ -1415,7 +1429,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "========================================="
     Write-Host ""
     
-    Write-Host "    [INFO] Setting up Docker context for remote execution..."
+    Write-Host "    [INFO] Setting up Docker context for remote execution..." -ForegroundColor Cyan
     Write-Host "    Remote host: $remoteHost"
     Write-Host "    Selected repository: $($script:SELECTED_REPO)"
     Write-Host "    Remote repository path: $remoteRepoPath/$($script:SELECTED_REPO)"
@@ -1426,7 +1440,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     
     # Verify Docker is available on remote host
     Write-Host ""
-    Write-Host "    [INFO] Checking remote Docker availability..."
+    Write-Host "    [INFO] Checking remote Docker availability..." -ForegroundColor Cyan
     Write-Host ""
     try {
         # Ensure we have the correct remote host for Docker verification
@@ -1434,11 +1448,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                 Write-Host ""
-                Write-Host "    [INFO] Using remote host for Docker verification: $remoteHost"
+                Write-Host "    [INFO] Using remote host for Docker verification: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
             } else {
                 Write-Host ""
-                Write-Host "    [ERROR] No remote host information available for Docker verification"
+                Write-Host "    [ERROR] No remote host information available for Docker verification" -ForegroundColor Red
                 Write-Host ""
                 exit 1
             }
@@ -1447,18 +1461,18 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         $dockerVersion = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker --version" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
-            Write-Host "    [SUCCESS] Docker is available on remote host"
+            Write-Host "    [SUCCESS] Docker is available on remote host" -ForegroundColor Green
             Write-Host "    Remote Docker version: $dockerVersion"
             Write-Host ""
             
             # Ensure Docker engine is running on remote host
             Write-Host ""
-            Write-Host "    [INFO] Checking remote Docker engine status..."
+            Write-Host "    [INFO] Checking remote Docker engine status..." -ForegroundColor Cyan
             Write-Host ""
             & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Host ""
-                Write-Host "    [WARNING] Docker engine is not running on remote host"
+                Write-Host "    [WARNING] Docker engine is not running on remote host" -ForegroundColor Yellow
                 Write-Host "    Attempting to start Docker service on Ubuntu 24.04..."
                 Write-Host ""
                 
@@ -1472,31 +1486,31 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     
                     if ($dockerGroupCheck -match "HAS_DOCKER_GROUP") {
                         Write-Host ""
-                        Write-Host "    [INFO] User is in docker group, trying Docker without sudo..."
+                        Write-Host "    [INFO] User is in docker group, trying Docker without sudo..." -ForegroundColor Cyan
                         Write-Host ""
                         # Try starting Docker service as regular user (if systemd allows)
                         $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "systemctl --user start docker || echo 'USER_START_FAILED'" 2>&1
                         if ($startResult -match "USER_START_FAILED") {
                             Write-Host ""
-                            Write-Host "    [INFO] User-level start failed, need system-level Docker service"
+                            Write-Host "    [INFO] User-level start failed, need system-level Docker service" -ForegroundColor Cyan
                             Write-Host ""
                             $needsSudo = $true
                         } else {
                             Write-Host ""
-                            Write-Host "    [SUCCESS] Docker service started at user level"
+                            Write-Host "    [SUCCESS] Docker service started at user level" -ForegroundColor Green
                             Write-Host ""
                             $needsSudo = $false
                         }
                     } else {
                         Write-Host ""
-                        Write-Host "    [INFO] User not in docker group, system-level service required"
+                        Write-Host "    [INFO] User not in docker group, system-level service required" -ForegroundColor Cyan
                         Write-Host ""
                         $needsSudo = $true
                     }
                     
                     if ($needsSudo) {
                         Write-Host ""
-                        Write-Host "    [INFO] System-level Docker service management required"
+                        Write-Host "    [INFO] System-level Docker service management required" -ForegroundColor Cyan
                         Write-Host "    Checking sudo access for Docker service..."
                         Write-Host ""
 
@@ -1505,21 +1519,21 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                         if ($sudoCheck -match "SUDO_OK") {
                             Write-Host ""
-                            Write-Host "    [SUCCESS] Passwordless sudo available for Docker service"
+                            Write-Host "    [SUCCESS] Passwordless sudo available for Docker service" -ForegroundColor Green
                             Write-Host ""
                             $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo systemctl start docker" 2>&1
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host ""
-                                Write-Host "    [SUCCESS] Docker service started via sudo"
+                                Write-Host "    [SUCCESS] Docker service started via sudo" -ForegroundColor Green
                                 Write-Host ""
                             } else {
                                 Write-Host ""
-                                Write-Host "    [WARNING] Could not start Docker service via sudo: $startResult"
+                                Write-Host "    [WARNING] Could not start Docker service via sudo: $startResult" -ForegroundColor Yellow
                                 Write-Host ""
                             }
                         } else {
                             Write-Host ""
-                            Write-Host "    [WARNING] Sudo requires password for Docker service management"
+                            Write-Host "    [WARNING] Sudo requires password for Docker service management" -ForegroundColor Yellow
                             Write-Host "    Cannot start Docker service automatically via SSH batch mode"
                             Write-Host ""
 
@@ -1554,7 +1568,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                         & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
                         if ($LASTEXITCODE -eq 0) {
-                            Write-Host " [SUCCESS]"
+                            Write-Host " [SUCCESS]" -ForegroundColor Green
                             break
                         } else {
                             Write-Host ""
@@ -1563,11 +1577,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         # Show different messages at different intervals
                         if ($attempt -eq 10) {
                             Write-Host ""
-                            Write-Host "    [INFO] Remote Docker is still starting up (this may take a moment)..."
+                            Write-Host "    [INFO] Remote Docker is still starting up (this may take a moment)..." -ForegroundColor Cyan
                             Write-Host ""
                         } elseif ($attempt -eq 20) {
                             Write-Host ""
-                            Write-Host "    [INFO] Still waiting for remote Docker daemon (almost ready)..."
+                            Write-Host "    [INFO] Still waiting for remote Docker daemon (almost ready)..." -ForegroundColor Cyan
                             Write-Host ""
                         }
                         
@@ -1577,12 +1591,12 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host ""
-                        Write-Host "    [SUCCESS] Remote Docker engine started successfully!"
+                        Write-Host "    [SUCCESS] Remote Docker engine started successfully!" -ForegroundColor Green
                         Write-Host "    Startup time: $attempt seconds"
                         Write-Host ""
                     } else {
                         Write-Host ""
-                        Write-Host "    [WARNING] Remote Docker engine did not start within $maxAttempts seconds"
+                        Write-Host "    [WARNING] Remote Docker engine did not start within $maxAttempts seconds" -ForegroundColor Yellow
                         Write-Host "    Please check Docker service on remote host manually"
                         Write-Host ""
                         
@@ -1596,12 +1610,12 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                         if ($choice -eq [System.Windows.Forms.DialogResult]::No) {
                             Write-Host ""
-                            Write-Host "    [INFO] Please start Docker on remote host manually"
+                            Write-Host "    [INFO] Please start Docker on remote host manually" -ForegroundColor Cyan
                             Write-Host ""
                             [System.Windows.Forms.MessageBox]::Show("Please start Docker on the remote host manually:`n`nsudo systemctl start docker`nsudo systemctl enable docker`n`nThen click OK to continue.", "Manual Start Required", "OK", "Information")
                         } elseif ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
                             Write-Host ""
-                            Write-Host "    [INFO] User chose to exit"
+                            Write-Host "    [INFO] User chose to exit" -ForegroundColor Cyan
                             Write-Host ""
                             exit 1
                         }
@@ -1610,7 +1624,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     
                 } catch {
                     Write-Host ""
-                    Write-Host "    [ERROR] Failed to start remote Docker service"
+                    Write-Host "    [ERROR] Failed to start remote Docker service" -ForegroundColor Red
                     Write-Host "    Error: $($_.Exception.Message)"
                     Write-Host "    Please start Docker on remote host manually"
                     Write-Host ""
@@ -1618,13 +1632,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                 
             } else {
                 Write-Host ""
-                Write-Host "    [SUCCESS] Remote Docker engine is running"
+                Write-Host "    [SUCCESS] Remote Docker engine is running" -ForegroundColor Green
                 Write-Host ""
             }
             Write-Host ""
         } else {
             Write-Host ""
-            Write-Host "    [ERROR] Docker is not available on remote host"
+            Write-Host "    [ERROR] Docker is not available on remote host" -ForegroundColor Red
             Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("Docker is not available on the remote host.`n`nPlease install and configure Docker on Ubuntu 24.04:`n`n" +
                 "sudo apt update`n" +
@@ -1638,7 +1652,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
     } catch {
         Write-Host ""
-        Write-Host "    [ERROR] Could not check remote Docker availability"
+        Write-Host "    [ERROR] Could not check remote Docker availability" -ForegroundColor Red
         Write-Host "    Error details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Could not verify remote Docker availability.`n`nError: $($_.Exception.Message)`n`nPlease ensure the remote host is accessible and Docker is installed.", "Remote Docker Check Failed", "OK", "Error")
@@ -1649,7 +1663,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     # Requires SSH access to a host that already has a Docker Engine running (Ubuntu 24.04)
     # The remote host uses Unix socket: unix:///var/run/docker.sock
     Write-Host ""
-    Write-Host "    [INFO] Configuring Docker context for remote Ubuntu 24.04 host..."
+    Write-Host "    [INFO] Configuring Docker context for remote Ubuntu 24.04 host..." -ForegroundColor Cyan
     Write-Host ""
 
     $RemoteContextName = "php_workstation"  # Name for the Docker context
@@ -1659,57 +1673,57 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         if ($script:REMOTE_HOST_IP) {
             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
             Write-Host ""
-            Write-Host "    [INFO] Using remote host for Docker context: $remoteHost"
+            Write-Host "    [INFO] Using remote host for Docker context: $remoteHost" -ForegroundColor Cyan
             Write-Host ""
         } else {
             Write-Host ""
-            Write-Host "    [ERROR] No remote host information available for Docker context"
+            Write-Host "    [ERROR] No remote host information available for Docker context" -ForegroundColor Red
             Write-Host ""
             exit 1
         }
     }
 
     # Check if the context already exists
-    Write-Host "    [INFO] Checking for existing Docker context..."
+    Write-Host "    [INFO] Checking for existing Docker context..." -ForegroundColor Cyan
     $existing = & docker context ls --format '{{.Name}}' 2>$null
     $exists = $existing -contains $RemoteContextName
 
     if (-not $exists) {
-        Write-Host "    [INFO] Creating Docker context '$RemoteContextName' for ssh://$remoteHost..."
+        Write-Host "    [INFO] Creating Docker context '$RemoteContextName' for ssh://$remoteHost..." -ForegroundColor Cyan
         & docker context create $RemoteContextName `
             --description "Remote Docker engine over SSH (Ubuntu 24.04)" `
             --docker "host=ssh://$remoteHost"
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "    [SUCCESS] Docker context created successfully"
+            Write-Host "    [SUCCESS] Docker context created successfully" -ForegroundColor Green
         } else {
-            Write-Host "    [ERROR] Failed to create Docker context"
+            Write-Host "    [ERROR] Failed to create Docker context" -ForegroundColor Red
         }
     } else {
-        Write-Host "    [INFO] Context '$RemoteContextName' already exists"
+        Write-Host "    [INFO] Context '$RemoteContextName' already exists" -ForegroundColor Cyan
     }
     Write-Host ""
 
     # Switch to the remote context
-    Write-Host "    [INFO] Switching to context '$RemoteContextName'..."
+    Write-Host "    [INFO] Switching to context '$RemoteContextName'..." -ForegroundColor Cyan
     & docker context use $RemoteContextName *> $null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "    [SUCCESS] Successfully switched to remote Docker context"
+        Write-Host "    [SUCCESS] Successfully switched to remote Docker context" -ForegroundColor Green
     } else {
-        Write-Host "    [WARNING] Failed to switch Docker context"
+        Write-Host "    [WARNING] Failed to switch Docker context" -ForegroundColor Yellow
     }
     Write-Host ""
 
     # Test remote Docker connection
-    Write-Host "    [INFO] Testing remote Docker connection..."
+    Write-Host "    [INFO] Testing remote Docker connection..." -ForegroundColor Cyan
     & docker --context $RemoteContextName version 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "    [SUCCESS] Remote Docker connection test passed"
+        Write-Host "    [SUCCESS] Remote Docker connection test passed" -ForegroundColor Green
     } else {
-        Write-Host "    [WARNING] Remote Docker connection test failed"
+        Write-Host "    [WARNING] Remote Docker connection test failed" -ForegroundColor Yellow
     }
     Write-Host ""
 
-    Write-Host "    [SUCCESS] Remote Docker environment is set up and ready to use!"
+    Write-Host "    [SUCCESS] Remote Docker environment is set up and ready to use!" -ForegroundColor Green
     Write-Host ""
 
 #----------------------------------------------------#
@@ -1723,7 +1737,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "========================================="
     Write-Host ""
     
-    Write-Host "    [INFO] Selecting local repository folder for container mounting..."
+    Write-Host "    [INFO] Selecting local repository folder for container mounting..." -ForegroundColor Cyan
     Write-Host ""
     
     # Create folder browser dialog
@@ -1740,18 +1754,18 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         $folderBrowser.SelectedPath = $documentsPath
     }
     
-    Write-Host "    [INFO] Opening folder selection dialog..."
+    Write-Host "    [INFO] Opening folder selection dialog..." -ForegroundColor Cyan
     Write-Host ""
     $folderResult = $folderBrowser.ShowDialog()
     
     if ($folderResult -eq [System.Windows.Forms.DialogResult]::OK) {
         $selectedPath = $folderBrowser.SelectedPath
-        Write-Host "    [INFO] Selected local folder: $selectedPath"
+        Write-Host "    [INFO] Selected local folder: $selectedPath" -ForegroundColor Cyan
         Write-Host ""
         
         # Validate that a folder was actually selected
         if ([string]::IsNullOrWhiteSpace($selectedPath) -or -not (Test-Path $selectedPath)) {
-            Write-Host "    [ERROR] Invalid folder selection"
+            Write-Host "    [ERROR] Invalid folder selection" -ForegroundColor Red
             Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("Please select a valid folder containing your repository.", "Invalid Selection", "OK", "Error")
             exit 1
@@ -1763,16 +1777,16 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         # Extract the repository name (last folder in the path)
         $script:SELECTED_REPO = Split-Path $selectedPath -Leaf
         
-        Write-Host "    [SUCCESS] Local repository path: $($script:LOCAL_REPO_PATH)"
-        Write-Host "    [SUCCESS] Repository name: $($script:SELECTED_REPO)"
+        Write-Host "    [SUCCESS] Local repository path: $($script:LOCAL_REPO_PATH)" -ForegroundColor Green
+        Write-Host "    [SUCCESS] Repository name: $($script:SELECTED_REPO)" -ForegroundColor Green
         Write-Host ""
         
         # Check if the selected folder contains a Git repository
         $gitPath = Join-Path $selectedPath ".git"
         if (Test-Path $gitPath) {
-            Write-Host "    [SUCCESS] Git repository detected in selected folder"
+            Write-Host "    [SUCCESS] Git repository detected in selected folder" -ForegroundColor Green
         } else {
-            Write-Host "    [WARNING] No .git directory found in selected folder"
+            Write-Host "    [WARNING] No .git directory found in selected folder" -ForegroundColor Yellow
             Write-Host "    This folder may not be a Git repository"
             Write-Host ""
             
@@ -1785,17 +1799,17 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             )
             
             if ($continueResult -eq [System.Windows.Forms.DialogResult]::No) {
-                Write-Host "    [INFO] User chose not to continue without Git repository"
+                Write-Host "    [INFO] User chose not to continue without Git repository" -ForegroundColor Cyan
                 Write-Host ""
                 exit 1
             } else {
-                Write-Host "    [INFO] User chose to continue without Git repository"
+                Write-Host "    [INFO] User chose to continue without Git repository" -ForegroundColor Cyan
                 Write-Host ""
             }
         }
         
     } else {
-        Write-Host "    [ERROR] User cancelled folder selection"
+        Write-Host "    [ERROR] User cancelled folder selection" -ForegroundColor Red
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Folder selection is required to continue.", "Selection Cancelled", "OK", "Warning")
         exit 1
@@ -1811,26 +1825,26 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host "========================================="
     Write-Host ""
     
-    Write-Host "    [INFO] Setting up Docker context for local execution..."
+    Write-Host "    [INFO] Setting up Docker context for local execution..." -ForegroundColor Cyan
     Write-Host "    Selected repository: $($script:SELECTED_REPO)"
     Write-Host "    Local repository path: $($script:LOCAL_REPO_PATH)"
     Write-Host ""
     
     # Verify Docker is available locally
-    Write-Host "    [INFO] Checking local Docker availability..."
+    Write-Host "    [INFO] Checking local Docker availability..." -ForegroundColor Cyan
     Write-Host ""
     try {
         $dockerVersion = & docker --version 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "    [SUCCESS] Docker is available locally"
+            Write-Host "    [SUCCESS] Docker is available locally" -ForegroundColor Green
             Write-Host "    Docker version: $dockerVersion"
             Write-Host ""
             
             # Ensure Docker engine is running
-            Write-Host "    [INFO] Checking Docker engine status..."
+            Write-Host "    [INFO] Checking Docker engine status..." -ForegroundColor Cyan
             & docker info 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Host "    [WARNING] Docker engine is not running"
+                Write-Host "    [WARNING] Docker engine is not running" -ForegroundColor Yellow
                 Write-Host "    Attempting to start Docker Desktop..."
                 Write-Host ""
                 
@@ -1847,7 +1861,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                             Write-Host "    Starting Docker Desktop application (alternative path)..."
                             Start-Process -FilePath $dockerDesktopAlt -WindowStyle Hidden
                         } else {
-                            Write-Host "    [WARNING] Docker Desktop executable not found in standard locations"
+                            Write-Host "    [WARNING] Docker Desktop executable not found in standard locations" -ForegroundColor Yellow
                             Write-Host "    Trying service startup as fallback..."
                             Start-Service -Name "com.docker.service" -ErrorAction SilentlyContinue
                         }
@@ -1865,7 +1879,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                         & docker info 2>&1 | Out-Null
                         if ($LASTEXITCODE -eq 0) {
-                            Write-Host " [SUCCESS]"
+                            Write-Host " [SUCCESS]" -ForegroundColor Green
                             break
                         } else {
                             Write-Host ""
@@ -1873,9 +1887,9 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                         # Show different messages at different intervals
                         if ($attempt -eq 10) {
-                            Write-Host "    [INFO] Docker is still starting up (this may take a moment)..."
+                            Write-Host "    [INFO] Docker is still starting up (this may take a moment)..." -ForegroundColor Cyan
                         } elseif ($attempt -eq 20) {
-                            Write-Host "    [INFO] Still waiting for Docker daemon (almost ready)..."
+                            Write-Host "    [INFO] Still waiting for Docker daemon (almost ready)..." -ForegroundColor Cyan
                         }
                         
                     } while ($attempt -lt $maxAttempts)
@@ -1883,10 +1897,10 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     # Final check
                     & docker info 2>&1 | Out-Null
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Host "    [SUCCESS] Docker engine started successfully!"
+                        Write-Host "    [SUCCESS] Docker engine started successfully!" -ForegroundColor Green
                         Write-Host "    Startup time: $attempt seconds"
                     } else {
-                        Write-Host "    [WARNING] Docker engine did not start within $maxAttempts seconds"
+                        Write-Host "    [WARNING] Docker engine did not start within $maxAttempts seconds" -ForegroundColor Yellow
                         Write-Host "    Please check Docker Desktop manually"
                         Write-Host ""
                         
@@ -1899,40 +1913,40 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         )
                         
                         if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
-                            Write-Host "    [INFO] Please start Docker Desktop manually and click OK when ready"
+                            Write-Host "    [INFO] Please start Docker Desktop manually and click OK when ready" -ForegroundColor Cyan
                             [System.Windows.Forms.MessageBox]::Show("Please start Docker Desktop manually and wait for it to be ready, then click OK to continue.", "Manual Start Required", "OK", "Information")
                         } elseif ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
-                            Write-Host "    [INFO] User chose to exit"
+                            Write-Host "    [INFO] User chose to exit" -ForegroundColor Cyan
                             exit 1
                         }
                         # If No is chosen, continue with warning
                     }
                     
                 } catch {
-                    Write-Host "    [ERROR] Failed to start Docker Desktop"
+                    Write-Host "    [ERROR] Failed to start Docker Desktop" -ForegroundColor Red
                     Write-Host "    Error: $($_.Exception.Message)"
                     Write-Host "    Please start Docker Desktop manually"
                 }
                 
             } else {
-                Write-Host "    [SUCCESS] Docker engine is running"
+                Write-Host "    [SUCCESS] Docker engine is running" -ForegroundColor Green
             }
             Write-Host ""
         } else {
-            Write-Host "    [ERROR] Docker is not available locally"
+            Write-Host "    [ERROR] Docker is not available locally" -ForegroundColor Red
             Write-Host ""
             [System.Windows.Forms.MessageBox]::Show("Docker is not available on this system.`n`nPlease ensure Docker Desktop is installed and running.", "Docker Not Available", "OK", "Error")
             exit 1
         }
     } catch {
-        Write-Host "    [ERROR] Could not check Docker availability"
+        Write-Host "    [ERROR] Could not check Docker availability" -ForegroundColor Red
         Write-Host "    Error details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Could not verify Docker availability.`n`nPlease ensure Docker Desktop is installed and running.", "Docker Check Failed", "OK", "Error")
         exit 1
     }
     
-    Write-Host "    [INFO] Setting up local Docker context..."
+    Write-Host "    [INFO] Setting up local Docker context..." -ForegroundColor Cyan
     Write-Host ""
 
     # Create/use a LOCAL Docker context
@@ -1959,48 +1973,48 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host ""
 
     # Check if the context already exists
-    Write-Host "    [INFO] Checking for existing Docker context..."
+    Write-Host "    [INFO] Checking for existing Docker context..." -ForegroundColor Cyan
     $exists = (& docker context ls --format '{{.Name}}' 2>$null) -contains $LocalContextName
 
     if (-not $exists) {
-        Write-Host "    [INFO] Creating Docker context '$LocalContextName' for $dockerHost..."
+        Write-Host "    [INFO] Creating Docker context '$LocalContextName' for $dockerHost..." -ForegroundColor Cyan
         & docker context create $LocalContextName --description "Local Docker engine" --docker "host=$dockerHost"
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "    [SUCCESS] Docker context created successfully"
+            Write-Host "    [SUCCESS] Docker context created successfully" -ForegroundColor Green
         } else {
-            Write-Host "    [ERROR] Failed to create Docker context"
+            Write-Host "    [ERROR] Failed to create Docker context" -ForegroundColor Red
         }
     } else {
-        Write-Host "    [INFO] Context '$LocalContextName' already exists"
+        Write-Host "    [INFO] Context '$LocalContextName' already exists" -ForegroundColor Cyan
     }
     Write-Host ""
 
     # Switch to the local context
-    Write-Host "    [INFO] Switching to context '$LocalContextName'..."
+    Write-Host "    [INFO] Switching to context '$LocalContextName'..." -ForegroundColor Cyan
     & docker context use $LocalContextName *> $null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "    [SUCCESS] Successfully switched to local Docker context"
+        Write-Host "    [SUCCESS] Successfully switched to local Docker context" -ForegroundColor Green
     } else {
-        Write-Host "    [WARNING] Failed to switch Docker context"
+        Write-Host "    [WARNING] Failed to switch Docker context" -ForegroundColor Yellow
     }
     Write-Host ""
 
     # Quick smoke test
-    Write-Host "    [INFO] Testing Docker connection..."
+    Write-Host "    [INFO] Testing Docker connection..." -ForegroundColor Cyan
     & docker --context $LocalContextName version 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "    [SUCCESS] Docker connection test passed"
+        Write-Host "    [SUCCESS] Docker connection test passed" -ForegroundColor Green
     } else {
-        Write-Host "    [WARNING] Docker connection test failed"
+        Write-Host "    [WARNING] Docker connection test failed" -ForegroundColor Yellow
     }
     Write-Host ""
 
-    Write-Host "    [SUCCESS] Local Docker environment is set up and ready to use!"
+    Write-Host "    [SUCCESS] Local Docker environment is set up and ready to use!" -ForegroundColor Green
     Write-Host ""
 
 } else {
     Write-Host ""
-    Write-Host "    [ERROR] Invalid container location state"
+    Write-Host "    [ERROR] Invalid container location state" -ForegroundColor Red
     Write-Host "    Please restart the application and select a valid option"
     Write-Host ""
     exit 1
@@ -2116,7 +2130,7 @@ Write-Host "  STEP 5: Container Status Check"
 Write-Host "================================================"
 Write-Host ""
 
-Write-Host "[INFO] Checking for existing containers for user: $USERNAME"
+Write-Host "[INFO] Checking for existing containers for user: $USERNAME" -ForegroundColor Cyan
 Write-Host ""
 
 try {
@@ -2124,7 +2138,7 @@ try {
     $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[WARNING] Could not check for existing containers. Consider checking manually in Docker Desktop!"
+        Write-Host "[WARNING] Could not check for existing containers. Consider checking manually in Docker Desktop!" -ForegroundColor Yellow
         Write-Host "  Continuing with container launch..."
         Write-Host ""
     } else {
@@ -2132,7 +2146,7 @@ try {
         $containerList = $existingContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_ -notmatch "^NAMES" }
         
         if ($containerList.Count -gt 0) {
-            Write-Host "[INFO] Found existing containers for user '$USERNAME':"
+            Write-Host "[INFO] Found existing containers for user '$USERNAME':" -ForegroundColor Cyan
             Write-Host ""
             
             # Display existing containers
@@ -2151,7 +2165,7 @@ try {
             $runningList = $runningContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_.Trim() -ne "" }
             
             if ($runningList.Count -gt 0) {
-                Write-Host "[WARNING] Found $($runningList.Count) RUNNING container(s) for user '$USERNAME':"
+                Write-Host "[WARNING] Found $($runningList.Count) RUNNING container(s) for user '$USERNAME':" -ForegroundColor Yellow
                 foreach ($runningContainer in $runningList) {
                     if ($runningContainer.Trim() -ne "") {
                         Write-Host "  - $runningContainer (RUNNING)"
@@ -2180,7 +2194,7 @@ try {
                 )
                 
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    Write-Host "[INFO] User chose to stop existing containers"
+                    Write-Host "[INFO] User chose to stop existing containers" -ForegroundColor Cyan
                     Write-Host ""
                     Write-Host "Stopping existing containers for user '$USERNAME'..."
                     
@@ -2189,21 +2203,21 @@ try {
                             Write-Host "  Stopping container: $runningContainer"
                             & docker stop $runningContainer 2>$null
                             if ($LASTEXITCODE -eq 0) {
-                                Write-Host "    [SUCCESS] Stopped: $runningContainer"
+                                Write-Host "    [SUCCESS] Stopped: $runningContainer" -ForegroundColor Green
                             } else {
-                                Write-Host "    [WARNING] Could not stop: $runningContainer"
+                                Write-Host "    [WARNING] Could not stop: $runningContainer" -ForegroundColor Yellow
                             }
                         }
                     }
                     Write-Host ""
-                    Write-Host "[SUCCESS] Container cleanup completed"
+                    Write-Host "[SUCCESS] Container cleanup completed" -ForegroundColor Green
                     
                 } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
-                    Write-Host "[INFO] User chose to continue with existing containers running"
-                    Write-Host "[WARNING] Proceeding with existing containers running may cause conflicts"
+                    Write-Host "[INFO] User chose to continue with existing containers running" -ForegroundColor Cyan
+                    Write-Host "[WARNING] Proceeding with existing containers running may cause conflicts" -ForegroundColor Yellow
                     
                 } else {
-                    Write-Host "[INFO] User cancelled container launch"
+                    Write-Host "[INFO] User cancelled container launch" -ForegroundColor Cyan
                     Write-Host "Please manage existing containers manually using:"
                     Write-Host "  docker ps -a                    # List all containers"
                     Write-Host "  docker stop <container_name>    # Stop a container"
@@ -2213,17 +2227,17 @@ try {
                     exit 0
                 }
             } else {
-                Write-Host "[INFO] Found existing containers, but none are currently running"
+                Write-Host "[INFO] Found existing containers, but none are currently running" -ForegroundColor Cyan
                 Write-Host "  These stopped containers will not interfere with new containers"
                 Write-Host ""
             }
         } else {
-            Write-Host "[INFO] No existing containers found for user '$USERNAME'"
+            Write-Host "[INFO] No existing containers found for user '$USERNAME'" -ForegroundColor Cyan
             Write-Host "  Ready to create new container: $CONTAINER_NAME"
             Write-Host ""
         }
     }} catch {
-    Write-Host "[WARNING] Error checking for existing containers: $($_.Exception.Message)"
+    Write-Host "[WARNING] Error checking for existing containers: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "  Continuing with container launch..."
     Write-Host ""
 }
@@ -2239,7 +2253,7 @@ Write-Host "  STEP 6: Container Management"
 Write-Host "================================================"
 Write-Host ""
 
-Write-Host "[INFO] Preparing container management interface..."
+Write-Host "[INFO] Preparing container management interface..." -ForegroundColor Cyan
 Write-Host "  Container Name: $CONTAINER_NAME"
 Write-Host "  Selected Repository: $($script:SELECTED_REPO)"
 Write-Host "  Username: $USERNAME"
@@ -2254,12 +2268,12 @@ try {
     }
     if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
         $isContainerRunning = $true
-        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING"
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING" -ForegroundColor Cyan
     } else {
-        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist"
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist" -ForegroundColor Cyan
     }
 } catch {
-    Write-Host "[WARNING] Could not check container status: $($_.Exception.Message)"
+    Write-Host "[WARNING] Could not check container status: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 Write-Host ""
@@ -2387,7 +2401,7 @@ $formContainer.CancelButton = $buttonCancel
 # Event handlers
 $buttonStart.Add_Click({
     Write-Host ""
-    Write-Host "[INFO] Container is starting up..."
+    Write-Host "[INFO] Container is starting up..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
     
     # Get options from form
@@ -2409,10 +2423,10 @@ $buttonStart.Add_Click({
         Exit 1
     } elseif (Test-Path $script:LOCAL_REPO_PATH) {
         $ScriptDir = "$script:LOCAL_REPO_PATH\docker_setup"
-        Write-Host "[INFO] Using local repository path: $script:LOCAL_REPO_PATH"
+        Write-Host "[INFO] Using local repository path: $script:LOCAL_REPO_PATH" -ForegroundColor Cyan
     } elseif (Test-Path $script:REMOTE_REPO_PATH) {
         $ScriptDir = "$script:REMOTE_REPO_PATH/docker_setup"
-        Write-Host "[INFO] Using remote repository path: $script:REMOTE_REPO_PATH"
+        Write-Host "[INFO] Using remote repository path: $script:REMOTE_REPO_PATH" -ForegroundColor Cyan
     } else {
         Write-Host "[FATAL ERROR] Neither local nor remote repository paths are valid. Please restart the application and select a valid folder."
         Exit 1
@@ -2451,12 +2465,12 @@ $buttonStart.Add_Click({
         Exit 1
     }
 
-    Write-Host "[INFO] Using configuration file: $SimDesignYaml"
+    Write-Host "[INFO] Using configuration file: $SimDesignYaml" -ForegroundColor Cyan
     Write-Host ""
 
     # Check if Docker image for the current model already exists
     $DockerImageName = $script:SELECTED_REPO.ToLower()
-    Write-Host "[INFO] Checking if a Docker image for your repo (e.g. $DockerImageName) already exists..."
+    Write-Host "[INFO] Checking if a Docker image for your repo (e.g. $DockerImageName) already exists..." -ForegroundColor Cyan
     Write-Host ""
 
     # Check if image exists
@@ -2473,15 +2487,15 @@ $buttonStart.Add_Click({
             $imageExists = $imageCheck -match "EXISTS"
         }
     } catch {
-        Write-Host "[WARNING] Could not check for existing Docker image: $($_.Exception.Message)"
+        Write-Host "[WARNING] Could not check for existing Docker image: $($_.Exception.Message)" -ForegroundColor Yellow
         $imageExists = $false
     }
 
     if ($imageExists) {
-        Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your container already exists"
+        Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your container already exists" -ForegroundColor Green
         Write-Host ""
     } else {
-        Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..."
+        Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..." -ForegroundColor Cyan
         Write-Host ""
 
         # Determine Dockerfile path for model image build
@@ -2493,10 +2507,10 @@ $buttonStart.Add_Click({
             $dockerContextPath = $script:REMOTE_REPO_PATH
         }
 
-        Write-Host "[INFO] Using Dockerfile: $dockerfilePath"
+        Write-Host "[INFO] Using Dockerfile: $dockerfilePath" -ForegroundColor Cyan
         Write-Host ""
 
-        Write-Host "[INFO] Docker build context: $dockerContextPath"
+        Write-Host "[INFO] Docker build context: $dockerContextPath" -ForegroundColor Cyan
         Write-Host ""
 
         # Check if Dockerfile exists
@@ -2510,7 +2524,7 @@ $buttonStart.Add_Click({
                 $dockerfileExists = $dockerfileCheck -match "EXISTS"
             }
         } catch {
-            Write-Host "[ERROR] Could not check for Dockerfile: $($_.Exception.Message)"
+            Write-Host "[ERROR] Could not check for Dockerfile: $($_.Exception.Message)" -ForegroundColor Red
             $dockerfileExists = $false
         }
 
@@ -2521,7 +2535,7 @@ $buttonStart.Add_Click({
         }
 
         # Build the Docker image
-        Write-Host "[INFO] Building Docker image '$DockerImageName'..."
+        Write-Host "[INFO] Building Docker image '$DockerImageName'..." -ForegroundColor Cyan
         Write-Host ""
         Write-Host "This may take several minutes depending on the image size and dependencies..."
         Write-Host ""
@@ -2529,11 +2543,11 @@ $buttonStart.Add_Click({
         try {
             # Start timing the build process
             $buildStartTime = Get-Date
-            Write-Host "[INFO] Docker build started at $(Get-Date -Format 'HH:mm:ss')"
+            Write-Host "[INFO] Docker build started at $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "[INFO] This process may take 5-15 minutes depending on your system and network speed..."
+            Write-Host "[INFO] This process may take 5-15 minutes depending on your system and network speed..." -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "[INFO] Build output will be shown below (this indicates progress):"
+            Write-Host "[INFO] Build output will be shown below (this indicates progress):" -ForegroundColor Cyan
             Write-Host ("=" * 80)
 
             if ($CONTAINER_LOCATION -eq "LOCAL") { 
@@ -2548,7 +2562,7 @@ $buttonStart.Add_Click({
                 Write-Host ""
 
                 # Execute Docker build with spinner
-                Write-Host "[INFO] Building Docker image (this may take 5-15 minutes)..." -NoNewline
+                Write-Host "[INFO] Building Docker image (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
                 Start-Spinner -Message ""
                 
                 try {
@@ -2580,7 +2594,7 @@ $buttonStart.Add_Click({
                     Stop-Spinner
                     Write-Host " [FAILED]" -ForegroundColor Red
                     Write-Host ""
-                    Write-Host "[ERROR] Exception during Docker build: $($_.Exception.Message)"
+                    Write-Host "[ERROR] Exception during Docker build: $($_.Exception.Message)" -ForegroundColor Red
                     $buildSuccess = $false
                     $buildResult = "Build failed with exception: $($_.Exception.Message)"
                 }
@@ -2598,7 +2612,7 @@ $buttonStart.Add_Click({
                 Write-Host ""
 
                 # Execute remote Docker build with spinner
-                Write-Host "[INFO] Building Docker image on remote host (this may take 5-15 minutes)..." -NoNewline
+                Write-Host "[INFO] Building Docker image on remote host (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
                 Start-Spinner -Message ""
 
                 try {
@@ -2635,7 +2649,7 @@ $buttonStart.Add_Click({
                     Write-Host ""
                     Write-Host " [FAILED]" -ForegroundColor Red
                     Write-Host ""
-                    Write-Host "[ERROR] Exception during remote Docker build: $($_.Exception.Message)"
+                    Write-Host "[ERROR] Exception during remote Docker build: $($_.Exception.Message)" -ForegroundColor Red
                     $buildSuccess = $false
                     $buildResult = "Remote build failed with exception: $($_.Exception.Message)"
                 }
@@ -2647,20 +2661,20 @@ $buttonStart.Add_Click({
             $buildEndTime = Get-Date
             $totalElapsed = $buildEndTime - $buildStartTime
             Write-Host ("=" * 80)
-            Write-Host "[INFO] Docker build completed at $(Get-Date -Format 'HH:mm:ss')"
+            Write-Host "[INFO] Docker build completed at $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "[INFO] Total build time: $("{0:mm\:ss}" -f $totalElapsed)"
+            Write-Host "[INFO] Total build time: $("{0:mm\:ss}" -f $totalElapsed)" -ForegroundColor Cyan
             Write-Host ""
 
             if ($buildSuccess) {
-                Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully!"
+                Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully!" -ForegroundColor Green
                 Write-Host ""
             } else {
-                Write-Host "[WARNING] Failed to build Docker image '$DockerImageName' on first attempt"
+                Write-Host "[WARNING] Failed to build Docker image '$DockerImageName' on first attempt" -ForegroundColor Yellow
                 Write-Host "Build output:"
                 Write-Host $buildResult
                 Write-Host ""
-                Write-Host "[INFO] Attempting fallback: building prerequisite image first..."
+                Write-Host "[INFO] Attempting fallback: building prerequisite image first..." -ForegroundColor Cyan
                 Write-Host ""
 
                 # Determine prerequisite Dockerfile path and build context (this time docker_setup folder)
@@ -2673,7 +2687,7 @@ $buttonStart.Add_Click({
                     $prereqDockerContextPath = "$script:REMOTE_REPO_PATH/docker_setup"
                 }
 
-                Write-Host "[INFO] Using prerequisite Dockerfile: $prereqDockerfilePath"
+                Write-Host "[INFO] Using prerequisite Dockerfile: $prereqDockerfilePath" -ForegroundColor Cyan
                 Write-Host ""
 
                 # Check if prerequisite Dockerfile exists
@@ -2687,15 +2701,15 @@ $buttonStart.Add_Click({
                         $prereqDockerfileExists = $prereqDockerfileCheck -match "EXISTS"
                     }
                 } catch {
-                    Write-Host "[ERROR] Could not check for prerequisite Dockerfile: $($_.Exception.Message)"
+                    Write-Host "[ERROR] Could not check for prerequisite Dockerfile: $($_.Exception.Message)" -ForegroundColor Red
                     Write-Host ""
                     $prereqDockerfileExists = $false
                 }
 
                 if ($prereqDockerfileExists) {
-                    Write-Host "[INFO] Building prerequisite Docker image..."
+                    Write-Host "[INFO] Building prerequisite Docker image..." -ForegroundColor Cyan
                     Write-Host ""
-                    Write-Host "[INFO] This may take 3-10 minutes for the prerequisite image..."
+                    Write-Host "[INFO] This may take 3-10 minutes for the prerequisite image..." -ForegroundColor Cyan
                     Write-Host ""
                     $prereqImageName = "$DockerImageName-prerequisite"
 
@@ -2716,7 +2730,7 @@ $buttonStart.Add_Click({
                             Write-Host ""
 
                             # Execute prerequisite build with spinner
-                            Write-Host "[INFO] Building prerequisite image (this may take 5-15 minutes)..." -NoNewline
+                            Write-Host "[INFO] Building prerequisite image (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
                             Start-Spinner -Message ""
                             Write-Host ""
 
@@ -2750,7 +2764,7 @@ $buttonStart.Add_Click({
                                 Write-Host ""
                                 Write-Host " [FAILED]" -ForegroundColor Red
                                 Write-Host ""
-                                Write-Host "[ERROR] Exception during prerequisite build: $($_.Exception.Message)"
+                                Write-Host "[ERROR] Exception during prerequisite build: $($_.Exception.Message)" -ForegroundColor Red
                                 $prereqBuildSuccess = $false
                                 $prereqBuildResult = "Prerequisite build failed with exception: $($_.Exception.Message)"
                             }
@@ -2767,7 +2781,7 @@ $buttonStart.Add_Click({
                             Write-Host ""
 
                             # Execute remote prerequisite build with spinner
-                            Write-Host "[INFO] Building prerequisite image on remote host (this may take 5-15 minutes)..." -NoNewline
+                            Write-Host "[INFO] Building prerequisite image on remote host (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
                             Start-Spinner -Message ""
 
                             try {
@@ -2803,7 +2817,7 @@ $buttonStart.Add_Click({
                                 Write-Host ""
                                 Write-Host " [FAILED]" -ForegroundColor Red
                                 Write-Host ""
-                                Write-Host "[ERROR] Exception during remote prerequisite build: $($_.Exception.Message)"
+                                Write-Host "[ERROR] Exception during remote prerequisite build: $($_.Exception.Message)" -ForegroundColor Red
                                 $prereqBuildSuccess = $false
                                 $prereqBuildResult = "Remote prerequisite build failed with exception: $($_.Exception.Message)"
                             }
@@ -2819,7 +2833,7 @@ $buttonStart.Add_Click({
                         Write-Host ""
 
                         if ($prereqBuildSuccess) {
-                            Write-Host "[SUCCESS] Prerequisite image built successfully! Retrying main image build..."
+                            Write-Host "[SUCCESS] Prerequisite image built successfully! Retrying main image build..." -ForegroundColor Green
 
                             # Retry building the main image TODO: Add logic that it does not try to build from kalleef account but uses the local prereq image!
                             try {
@@ -2842,7 +2856,7 @@ $buttonStart.Add_Click({
 
                                     # Execute retry build with spinner
                                     Write-Host ""
-                                    Write-Host "[INFO] Retrying main image build (should be faster with prerequisite)..." -NoNewline
+                                    Write-Host "[INFO] Retrying main image build (should be faster with prerequisite)..." -NoNewline -ForegroundColor Cyan
                                     Start-Spinner -Message ""
 
                                     try {
@@ -2875,7 +2889,7 @@ $buttonStart.Add_Click({
                                         Write-Host ""
                                         Write-Host " [FAILED]" -ForegroundColor Red
                                         Write-Host ""
-                                        Write-Host "[ERROR] Exception during retry build: $($_.Exception.Message)"
+                                        Write-Host "[ERROR] Exception during retry build: $($_.Exception.Message)" -ForegroundColor Red
                                         $retryBuildSuccess = $false
                                         $retryBuildResult = "Retry build failed with exception: $($_.Exception.Message)"
                                     }
@@ -2892,7 +2906,7 @@ $buttonStart.Add_Click({
 
                                     # Execute remote retry build with spinner
                                     Write-Host ""
-                                    Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -NoNewline
+                                    Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -NoNewline -ForegroundColor Cyan
                                     Start-Spinner -Message ""
 
                                     try {
@@ -2929,7 +2943,7 @@ $buttonStart.Add_Click({
                                         Write-Host ""
                                         Write-Host " [FAILED]" -ForegroundColor Red
                                         Write-Host ""
-                                        Write-Host "[ERROR] Exception during remote retry build: $($_.Exception.Message)"
+                                        Write-Host "[ERROR] Exception during remote retry build: $($_.Exception.Message)" -ForegroundColor Red
                                         $retryBuildSuccess = $false
                                         $retryBuildResult = "Remote retry build failed with exception: $($_.Exception.Message)"
                                     }
@@ -2945,10 +2959,10 @@ $buttonStart.Add_Click({
 
                                 if ($retryBuildSuccess) {
                                     Write-Host ""
-                                    Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully after prerequisite build!"
+                                    Write-Host "[SUCCESS] Docker image '$DockerImageName' built successfully after prerequisite build!" -ForegroundColor Green
                                 } else {
                                     Write-Host ""
-                                    Write-Host "[ERROR] Failed to build Docker image '$DockerImageName' even after building prerequisite"
+                                    Write-Host "[ERROR] Failed to build Docker image '$DockerImageName' even after building prerequisite" -ForegroundColor Red
                                     Write-Host ""
                                     Write-Host "Retry build output:"
                                     Write-Host $retryBuildResult
@@ -2956,11 +2970,11 @@ $buttonStart.Add_Click({
                                 }
                             } catch {
                                 Write-Host ""
-                                Write-Host "[ERROR] Exception occurred during retry build: $($_.Exception.Message)"
+                                Write-Host "[ERROR] Exception occurred during retry build: $($_.Exception.Message)" -ForegroundColor Red
                                 Exit 1
                             }
                         } else {
-                            Write-Host "[ERROR] Failed to build prerequisite Docker image"
+                            Write-Host "[ERROR] Failed to build prerequisite Docker image" -ForegroundColor Red
                             Write-Host ""
                             Write-Host "Prerequisite build output:"
                             Write-Host $prereqBuildResult
@@ -2968,12 +2982,12 @@ $buttonStart.Add_Click({
                         }
                     } catch {
                         Write-Host ""
-                        Write-Host "[ERROR] Exception occurred while building prerequisite image: $($_.Exception.Message)"
+                        Write-Host "[ERROR] Exception occurred while building prerequisite image: $($_.Exception.Message)" -ForegroundColor Red
                         Exit 1
                     }
                 } else {
                     Write-Host ""
-                    Write-Host "[ERROR] Prerequisite Dockerfile not found at: $prereqDockerfilePath"
+                    Write-Host "[ERROR] Prerequisite Dockerfile not found at: $prereqDockerfilePath" -ForegroundColor Red
                     Write-Host ""
                     Write-Host "[FATAL ERROR] Cannot build Docker image - both main and prerequisite Dockerfiles failed"
                     Exit 1
@@ -2981,7 +2995,7 @@ $buttonStart.Add_Click({
             }
         } catch {
             Write-Host ""
-            Write-Host "[ERROR] Exception occurred while building Docker image: $($_.Exception.Message)"
+            Write-Host "[ERROR] Exception occurred while building Docker image: $($_.Exception.Message)" -ForegroundColor Red
             Exit 1
         }
     }
@@ -2995,7 +3009,7 @@ $buttonStart.Add_Click({
     $SafeCurrentUser = $USERNAME -replace '[^a-zA-Z0-9]', '_' -replace '__+', '_' -replace '^_|_$', ''
     if ([string]::IsNullOrEmpty($SafeCurrentUser)) {
         $SafeCurrentUser = "dockeruser"
-        Write-Host "[WARNING] Could not determine a valid username, using fallback: $SafeCurrentUser"
+        Write-Host "[WARNING] Could not determine a valid username, using fallback: $SafeCurrentUser" -ForegroundColor Yellow
     }
 
     # Get user identity information for non-root Docker execution
@@ -3042,10 +3056,10 @@ $buttonStart.Add_Click({
         Exit 1
     }
 
-    Write-Host "[INFO] Mounting output_dir to container ($CONTAINER_NAME):    $outputDir"
+    Write-Host "[INFO] Mounting output_dir to container ($CONTAINER_NAME):    $outputDir" -ForegroundColor Cyan
     Write-Host ""
     Write-Host ""       # Keep using forward slashes for Docker mounts
-    Write-Host "[INFO] Mounting synthpop_dir to container ($CONTAINER_NAME):  $synthpopDir"
+    Write-Host "[INFO] Mounting synthpop_dir to container ($CONTAINER_NAME):  $synthpopDir" -ForegroundColor Cyan
     Write-Host ""
     Write-Host ""       # Keep using forward slashes for Docker mounts
 
@@ -3054,7 +3068,7 @@ $buttonStart.Add_Click({
     #-------------------------------------#
     
     if ($useVolumes) {
-        Write-Host "[INFO] Using Docker volumes for outputs and synthpop..."
+        Write-Host "[INFO] Using Docker volumes for outputs and synthpop..." -ForegroundColor Cyan
         
         # Configure SSH key paths based on execution location
         if ($CONTAINER_LOCATION -eq "LOCAL") {
@@ -3071,15 +3085,15 @@ $buttonStart.Add_Click({
         $rsyncImage = "rsync-alpine"
         & docker image inspect $rsyncImage > $null 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[INFO] Building rsync-alpine image..."
+            Write-Host "[INFO] Building rsync-alpine image..." -ForegroundColor Cyan
 
             # Check if Dockerfile.rsync exists
             $DockerfileRsync = Join-Path $ScriptDir "Dockerfile.rsync"
             if (Test-Path $DockerfileRsync) {
-                Write-Host "[INFO] Using Dockerfile.rsync..."
+                Write-Host "[INFO] Using Dockerfile.rsync..." -ForegroundColor Cyan
                 & docker build -f "$DockerfileRsync" -t $rsyncImage $ScriptDir
             } else {
-                Write-Host "[WARNING] Dockerfile.rsync not found, creating rsync image inline..."
+                Write-Host "[WARNING] Dockerfile.rsync not found, creating rsync image inline..." -ForegroundColor Yellow
                 $InlineDockerfile = @"
 FROM alpine:latest
 RUN apk add --no-cache rsync
@@ -3087,7 +3101,7 @@ RUN apk add --no-cache rsync
                 $InlineDockerfile | & docker build -t $rsyncImage -
             }
         } else {
-            Write-Host "[INFO] Using existing rsync-alpine image."
+            Write-Host "[INFO] Using existing rsync-alpine image." -ForegroundColor Cyan
         }
 
         # Ensure local output directories exist
@@ -3095,7 +3109,7 @@ RUN apk add --no-cache rsync
         if (-not (Test-Path $synthpopDir)) { New-Item -ItemType Directory -Path $synthpopDir | Out-Null }
 
         # Remove any existing volumes (ignore errors if not removable)
-        Write-Host "[INFO] Removing any existing volumes (if possible)..."
+        Write-Host "[INFO] Removing any existing volumes (if possible)..." -ForegroundColor Cyan
         & docker volume rm $VolumeOutput -f 2>$null
         & docker volume rm $VolumeSynthpop -f 2>$null
 
@@ -3106,14 +3120,14 @@ RUN apk add --no-cache rsync
         # Fix volume ownership and pre-populate volumes:
         # Docker volumes are created with root ownership by default. We need to fix
         # the ownership before we can populate them as the calling user.
-        Write-Host "[INFO] Setting correct ownership for Docker volumes..."
+        Write-Host "[INFO] Setting correct ownership for Docker volumes..." -ForegroundColor Cyan
         & docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
         & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
         Write-Host ""
 
         # Pre-populate volumes:
         # The output and synthpop volumes are populated from the respective local folders.
-        Write-Host "[INFO] Populating output volume from local folder..."
+        Write-Host "[INFO] Populating output volume from local folder..." -ForegroundColor Cyan
         # Use permission-tolerant copy with fallback logic
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             # For local Windows, convert paths for Docker
@@ -3124,15 +3138,16 @@ RUN apk add --no-cache rsync
             $dockerOutputSource = $outputDir
             $dockerSynthpopSource = $synthpopDir
         }
-        
-        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
-        
-        Write-Host "[INFO] Populating synthpop volume from local folder..."
-        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+
+        Write-Host "[INFO] Populating output volume from local folder..." -ForegroundColor Cyan
         Write-Host ""
+        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        Write-Host "[INFO] Populating synthpop volume from local folder..." -ForegroundColor Cyan
+        Write-Host ""
+        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
 
         # Run the main container with volumes mounted.
-        Write-Host "[INFO] Running the main container using Docker volumes..."
+        Write-Host "[INFO] Running the main container using Docker volumes..." -ForegroundColor Cyan
         # Construct arguments as an array for reliable passing
         $dockerArgs = @(
             "run", "-d", "--rm",     
@@ -3154,30 +3169,30 @@ RUN apk add --no-cache rsync
             "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
             "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
             # Working directory
-            "--workdir", "/IMPACTncd_Germany"
+            "--workdir", "/home/rstudio/IMPACTncd_Germany"
         )
 
         # Add final argument
         $dockerArgs += $DockerImageName
 
         # Execute docker with the arguments array
-        Write-Host "[INFO] Starting RStudio Server container with volumes..."
+        Write-Host "[INFO] Starting RStudio Server container with volumes..." -ForegroundColor Cyan
         & docker $dockerArgs
         Write-Host ""
         Write-Host ""
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[SUCCESS] RStudio Server container started successfully!"
+            Write-Host "[SUCCESS] RStudio Server container started successfully!" -ForegroundColor Green
             Write-Host ""
             
             # Wait a moment for the container to fully start
-            Write-Host "[INFO] Waiting for RStudio Server to initialize..."
+            Write-Host "[INFO] Waiting for RStudio Server to initialize..." -ForegroundColor Cyan
             Start-Sleep -Seconds 3
             
             # Check if container is still running
             $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             if ($containerStatus) {
-                Write-Host "[SUCCESS] Container is running: $containerStatus"
+                Write-Host "[SUCCESS] Container is running: $containerStatus" -ForegroundColor Green
                 Write-Host ""
                 Write-Host "==============================================="
                 Write-Host "  RStudio Server Access Information"
@@ -3195,8 +3210,8 @@ RUN apk add --no-cache rsync
                 Write-Host "  Using Docker Volumes: Yes"
                 Write-Host "==============================================="
                 Write-Host ""
-                Write-Host "[INFO] Container is running in the background."
-                Write-Host "[INFO] Use the 'Stop Container' button to stop it when done."
+                Write-Host "[INFO] Container is running in the background." -ForegroundColor Cyan
+                Write-Host "[INFO] Use the 'Stop Container' button to stop it when done." -ForegroundColor Cyan
                 
                 # Update UI state - container started successfully
                 $buttonStart.Enabled = $false
@@ -3204,36 +3219,36 @@ RUN apk add --no-cache rsync
                 $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION`nVolumes: Enabled"
                 
             } else {
-                Write-Host "[WARNING] Container may have exited. Checking logs..."
+                Write-Host "[WARNING] Container may have exited. Checking logs..." -ForegroundColor Yellow
                 $containerLogs = & docker logs $CONTAINER_NAME 2>&1
-                Write-Host "[ERROR] Container logs:"
+                Write-Host "[ERROR] Container logs:" -ForegroundColor Red
                 Write-Host $containerLogs
                 
                 # Container failed to start properly - keep start button enabled
-                Write-Host "[ERROR] Container failed to start properly. Please check the logs above."
+                Write-Host "[ERROR] Container failed to start properly. Please check the logs above." -ForegroundColor Red
             }
         } else {
-            Write-Host "[ERROR] Failed to start RStudio Server container with volumes"
+            Write-Host "[ERROR] Failed to start RStudio Server container with volumes" -ForegroundColor Red
             Write-Host "Exit code: $LASTEXITCODE"
             Write-Host "Execution location: $CONTAINER_LOCATION"
         }
 
     } else {
-        Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..."
+        Write-Host "[INFO] Using direct bind mounts for outputs and synthpop..." -ForegroundColor Cyan
         Write-Host ""
 
         # Configure Docker arguments based on execution location (LOCAL vs REMOTE)
         if ($CONTAINER_LOCATION -eq "LOCAL") {
-            Write-Host "[INFO] Configuring Docker arguments for LOCAL Windows execution..."
+            Write-Host "[INFO] Configuring Docker arguments for LOCAL Windows execution..." -ForegroundColor Cyan
             Write-Host ""
 
             # Convert paths for Docker bind mount (Windows to WSL format)
             $DockerOutputDir = Convert-PathToDockerFormat -Path $outputDir
             $DockerSynthpopDir = Convert-PathToDockerFormat -Path $synthpopDir
             
-            Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
+            Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
+            Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir" -ForegroundColor Cyan
             Write-Host ""
 
             # Configure SSH key paths for Windows
@@ -3260,20 +3275,20 @@ RUN apk add --no-cache rsync
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
                 "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
                 # Working directory
-                "--workdir", "/IMPACTncd_Germany"
+                "--workdir", "/home/rstudio/IMPACTncd_Germany"
             )
             
         } else {
-            Write-Host "[INFO] Configuring Docker arguments for REMOTE Linux execution..."
+            Write-Host "[INFO] Configuring Docker arguments for REMOTE Linux execution..." -ForegroundColor Cyan
             Write-Host ""
 
             # For remote execution, paths are already in Unix format
             $DockerOutputDir = $outputDir
             $DockerSynthpopDir = $synthpopDir
             
-            Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir"
+            Write-Host "[INFO] Docker Output Dir:   $DockerOutputDir" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir"
+            Write-Host "[INFO] Docker Synthpop Dir: $DockerSynthpopDir" -ForegroundColor Cyan
             Write-Host ""
             
             # Configure SSH key paths for Linux (remote host)
@@ -3300,7 +3315,7 @@ RUN apk add --no-cache rsync
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
                 "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
                 # Working directory
-                "--workdir", "/IMPACTncd_Germany"
+                "--workdir", "/home/rstudio/IMPACTncd_Germany"
             )
         }
 
@@ -3309,7 +3324,7 @@ RUN apk add --no-cache rsync
 
         # Execute docker with the arguments array
         Write-Host ""
-        Write-Host "[INFO] Starting RStudio Server container..."
+        Write-Host "[INFO] Starting RStudio Server container..." -ForegroundColor Cyan
         Write-Host ""
         & docker $dockerArgs
         Write-Host ""
@@ -3317,18 +3332,18 @@ RUN apk add --no-cache rsync
         
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
-            Write-Host "[SUCCESS] RStudio Server container started successfully!"
+            Write-Host "[SUCCESS] RStudio Server container started successfully!" -ForegroundColor Green
             Write-Host ""
             
             # Wait a moment for the container to fully start
-            Write-Host "[INFO] Waiting for RStudio Server to initialize..."
+            Write-Host "[INFO] Waiting for RStudio Server to initialize..." -ForegroundColor Cyan
             Write-Host ""
             Start-Sleep -Seconds 3
             
             # Check if container is still running
             $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             if ($containerStatus) {
-                Write-Host "[SUCCESS] Container is running: $containerStatus"
+                Write-Host "[SUCCESS] Container is running: $containerStatus" -ForegroundColor Green
                 Write-Host ""
                 Write-Host "==============================================="
                 Write-Host "  RStudio Server Access Information"
@@ -3345,8 +3360,8 @@ RUN apk add --no-cache rsync
                 Write-Host "  Execution Location: $CONTAINER_LOCATION"
                 Write-Host "==============================================="
                 Write-Host ""
-                Write-Host "[INFO] Container is running in the background."
-                Write-Host "[INFO] Use the 'Stop Container' button to stop it when done."
+                Write-Host "[INFO] Container is running in the background." -ForegroundColor Cyan
+                Write-Host "[INFO] Use the 'Stop Container' button to stop it when done." -ForegroundColor Cyan
                 
                 # Update UI state - container started successfully
                 $buttonStart.Enabled = $false
@@ -3355,19 +3370,19 @@ RUN apk add --no-cache rsync
                 
             } else {
                 Write-Host ""
-                Write-Host "[WARNING] Container may have exited. Checking logs..."
+                Write-Host "[WARNING] Container may have exited. Checking logs..." -ForegroundColor Yellow
                 Write-Host ""
                 $containerLogs = & docker logs $CONTAINER_NAME 2>&1
-                Write-Host "[ERROR] Container logs:"
+                Write-Host "[ERROR] Container logs:" -ForegroundColor Red
                 Write-Host $containerLogs
                 
                 # Container failed to start properly - keep start button enabled
                 Write-Host ""
-                Write-Host "[ERROR] Container failed to start properly. Please check the logs above."
+                Write-Host "[ERROR] Container failed to start properly. Please check the logs above." -ForegroundColor Red
             }
         } else {
             Write-Host ""
-            Write-Host "[ERROR] Failed to start RStudio Server container"
+            Write-Host "[ERROR] Failed to start RStudio Server container" -ForegroundColor Red
             Write-Host ""
             Write-Host "Exit code: $LASTEXITCODE"
             Write-Host ""
@@ -3379,27 +3394,27 @@ RUN apk add --no-cache rsync
 
 $buttonStop.Add_Click({
     Write-Host ""
-    Write-Host "[INFO] Container is stopping..."
+    Write-Host "[INFO] Container is stopping..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
     Write-Host ""
     
     # Check if container is actually running before attempting to stop
-    Write-Host "[INFO] Checking if container '$CONTAINER_NAME' is running..."
+    Write-Host "[INFO] Checking if container '$CONTAINER_NAME' is running..." -ForegroundColor Cyan
     $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     Write-Host ""
     
     if ($containerRunning -and $containerRunning.Trim() -eq $CONTAINER_NAME) {
-        Write-Host "[INFO] Container '$CONTAINER_NAME' is running. Stopping..."
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is running. Stopping..." -ForegroundColor Cyan
         Write-Host ""
         
         try {
             # Stop the container gracefully
-            Write-Host "[INFO] Attempting graceful shutdown (SIGTERM)..."
+            Write-Host "[INFO] Attempting graceful shutdown (SIGTERM)..." -ForegroundColor Cyan
             Write-Host ""
             & docker stop $CONTAINER_NAME 2>&1 | Out-Null
             
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[SUCCESS] Container '$CONTAINER_NAME' stopped successfully"
+                Write-Host "[SUCCESS] Container '$CONTAINER_NAME' stopped successfully" -ForegroundColor Green
                 Write-Host ""
                 
                 # Wait a moment to ensure container is fully stopped
@@ -3408,14 +3423,14 @@ $buttonStop.Add_Click({
                 # Verify the container is actually stopped
                 $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
-                    Write-Host "[SUCCESS] Container confirmed stopped."
+                    Write-Host "[SUCCESS] Container confirmed stopped." -ForegroundColor Green
                     Write-Host ""
                     
                     if ($useVolumes) {
                         Write-Host ""
                         # After the container exits:
                         # Synchronize the output and synthpop volumes back to the local directories using rsync.
-                        Write-Host "[INFO] Container exited. Syncing volumes back to local directories using rsync (checksum mode)..."
+                        Write-Host "[INFO] Container exited. Syncing volumes back to local directories using rsync (checksum mode)..." -ForegroundColor Cyan
                         Write-Host ""
                         
                         # Configure paths based on execution location
@@ -3436,7 +3451,7 @@ $buttonStop.Add_Click({
                         Write-Host ""
 
                         # Clean up all the Docker volumes used for the simulation.
-                        Write-Host "[INFO] Cleaning up Docker volumes..."
+                        Write-Host "[INFO] Cleaning up Docker volumes..." -ForegroundColor Cyan
                         & docker volume rm $VolumeOutput | Out-Null
                         & docker volume rm $VolumeSynthpop | Out-Null
                         Write-Host ""
@@ -3462,26 +3477,26 @@ $buttonStop.Add_Click({
                     
                 } else {
                     Write-Host ""
-                    Write-Host "[WARNING] Container may still be running. Please check Docker Desktop$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' })."
+                    Write-Host "[WARNING] Container may still be running. Please check Docker Desktop$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' })." -ForegroundColor Yellow
                 }
                 
             } else {
                 Write-Host ""
-                Write-Host "[ERROR] Failed to stop container '$CONTAINER_NAME'"
-                Write-Host "[INFO] Attempting force stop..."
+                Write-Host "[ERROR] Failed to stop container '$CONTAINER_NAME'" -ForegroundColor Red
+                Write-Host "[INFO] Attempting force stop..." -ForegroundColor Cyan
                 Write-Host ""
                 
                 # Try force stop if graceful stop failed
                 & docker kill $CONTAINER_NAME 2>&1 | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host ""
-                    Write-Host "[SUCCESS] Container '$CONTAINER_NAME' force stopped"
+                    Write-Host "[SUCCESS] Container '$CONTAINER_NAME' force stopped" -ForegroundColor Green
                     Write-Host ""
                     
                     # Handle volume cleanup for force stop too
                     if ($useVolumes) {
                         Write-Host ""
-                        Write-Host "[INFO] Force stopped - performing volume sync and cleanup..."
+                        Write-Host "[INFO] Force stopped - performing volume sync and cleanup..." -ForegroundColor Cyan
                         Write-Host ""
                         
                         # Configure paths based on execution location
@@ -3506,22 +3521,22 @@ $buttonStop.Add_Click({
                     $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
                 } else {
                     Write-Host ""
-                    Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'"
-                    Write-Host "[INFO] Please check Docker$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' }) and stop the container manually if needed"
+                    Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'" -ForegroundColor Red
+                    Write-Host "[INFO] Please check Docker$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' }) and stop the container manually if needed" -ForegroundColor Cyan
                     Write-Host ""
                 }
             }
             
         } catch {
             Write-Host ""
-            Write-Host "[ERROR] Exception occurred while stopping container: $($_.Exception.Message)"
+            Write-Host "[ERROR] Exception occurred while stopping container: $($_.Exception.Message)" -ForegroundColor Red
             [System.Windows.Forms.MessageBox]::Show("Error stopping container: $($_.Exception.Message)`n`nPlease check Docker Desktop and stop the container manually if needed.", "Container Stop Error", "OK", "Error")
         }
         
     } else {
         Write-Host ""
-        Write-Host "[INFO] Container '$CONTAINER_NAME' is not running"
-        Write-Host "[INFO] No action needed - updating UI state"
+        Write-Host "[INFO] Container '$CONTAINER_NAME' is not running" -ForegroundColor Cyan
+        Write-Host "[INFO] No action needed - updating UI state" -ForegroundColor Cyan
         Write-Host ""
         
         # Container is already stopped - just update UI
@@ -3529,14 +3544,14 @@ $buttonStop.Add_Click({
         $buttonStop.Enabled = $false
         $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
         
-        Write-Host "[INFO] UI updated to reflect stopped state"
+        Write-Host "[INFO] UI updated to reflect stopped state" -ForegroundColor Cyan
         Write-Host ""
     }
 })
 
 $buttonOK.Add_Click({
     Write-Host ""
-    Write-Host "[INFO] Container management dialog closed"
+    Write-Host "[INFO] Container management dialog closed" -ForegroundColor Cyan
     $formContainer.Close()
 })
 
