@@ -3150,6 +3150,8 @@ RUN apk add --no-cache rsync
             "run", "-d", "--rm",     
             # User identity environment variables
             "--name", "$CONTAINER_NAME",
+            "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+            "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
             "-e", "USERID=$UserId",
             "-e", "GROUPID=$GroupId",
             "-e", "PASSWORD=$PASSWORD",
@@ -3162,8 +3164,6 @@ RUN apk add --no-cache rsync
             # SSH key and known_hosts for git access (Windows paths)
             "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
             "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
-            "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
-            "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
             # Working directory
             "--workdir", "/home/rstudio/IMPACTncd_Germany"
         )
@@ -3255,6 +3255,8 @@ RUN apk add --no-cache rsync
                 "run", "-d", "--rm",     
                 # User identity environment variables
                 "--name", "$CONTAINER_NAME",
+                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+                "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
                 "-e", "USERID=$UserId",
                 "-e", "GROUPID=$GroupId",
                 "-e", "PASSWORD=$PASSWORD",
@@ -3267,8 +3269,6 @@ RUN apk add --no-cache rsync
                 # SSH key and known_hosts for git access (Windows paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
-                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
-                "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
                 # Working directory
                 "--workdir", "/home/rstudio/IMPACTncd_Germany"
             )
@@ -3294,6 +3294,8 @@ RUN apk add --no-cache rsync
                 "run", "-d", "--rm",     
                 # User identity environment variables
                 "--name", "$CONTAINER_NAME",
+                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
+                "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
                 "-e", "USERID=$UserId",
                 "-e", "GROUPID=$GroupId",
                 "-e", "PASSWORD=$PASSWORD",
@@ -3306,8 +3308,6 @@ RUN apk add --no-cache rsync
                 # SSH key and known_hosts for git access (Linux paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
-                "-e", "GIT_SSH_COMMAND=ssh -i /keys/id_ed25519_${USERNAME} -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/ssh/ssh_known_hosts -o StrictHostKeyChecking=yes",
-                "-e", "GIT_KEY_PATH=/keys/id_ed25519_${USERNAME}",
                 # Working directory
                 "--workdir", "/home/rstudio/IMPACTncd_Germany"
             )
