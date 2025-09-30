@@ -2522,6 +2522,7 @@ $buttonStart.Add_Click({
 
         # Build the Docker image
         Write-Host "[INFO] Building Docker image '$DockerImageName'..."
+        Write-Host ""
         Write-Host "This may take several minutes depending on the image size and dependencies..."
         Write-Host ""
 
@@ -3015,8 +3016,15 @@ $buttonStart.Add_Click({
     $ProjectRoot = $ProjectRoot -replace '\\', '/'
 
     # Call the function passing $ProjectRoot
-    $outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot | Out-Null
-    $synthpopDir  = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot | Out-Null
+    Write-Host ""
+    Write-Host ""
+    $outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
+    Write-Host ""
+    Write-Host ""
+    $synthpopDir  = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
+    Write-Host ""
+    Write-Host ""
+
 
     # Validate or create output directory
     if (-not (Test-AndCreateDirectory -Path $outputDir -PathKey "output_dir")) {
@@ -3139,8 +3147,8 @@ RUN apk add --no-cache rsync
             # Port mapping with override support
             "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
             # Directory mounts
-            "-v", "${VolumeOutput}:/output",
-            "-v", "${VolumeSynthpop}:/synthpop",
+            "-v", "${VolumeOutput}:/home/rstudio/IMPACTncd_Germany/outputs",
+            "-v", "${VolumeSynthpop}:/home/rstudio/IMPACTncd_Germany/inputs/synthpop",
             # SSH key and known_hosts for git access (Windows paths)
             "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
             "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
@@ -3245,8 +3253,8 @@ RUN apk add --no-cache rsync
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts
-                "--mount", "type=bind,source=$DockerOutputDir,target=/IMPACTncd_Germany/output",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/IMPACTncd_Germany/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/IMPACTncd_Germany/outputs",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/IMPACTncd_Germany/inputs/synthpop",
                 # SSH key and known_hosts for git access (Windows paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
@@ -3285,8 +3293,8 @@ RUN apk add --no-cache rsync
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts (Unix paths)
-                "--mount", "type=bind,source=$DockerOutputDir,target=/IMPACTncd_Germany/output",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/IMPACTncd_Germany/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/IMPACTncd_Germany/outputs",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/IMPACTncd_Germany/inputs/synthpop",
                 # SSH key and known_hosts for git access (Linux paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
