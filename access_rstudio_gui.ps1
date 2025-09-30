@@ -2398,14 +2398,25 @@ $formContainer.Controls.Add($buttonCancel)
 $formContainer.AcceptButton = $buttonOK
 $formContainer.CancelButton = $buttonCancel
 
+# Declare variables at form scope so both event handlers can access them
+$script:useVolumes = $false
+$script:outputDir = $null
+$script:synthpopDir = $null
+$script:VolumeOutput = $null
+$script:VolumeSynthpop = $null
+$script:UserId = $null
+$script:GroupId = $null
+$script:rsyncImage = $null
+
 # Event handlers
 $buttonStart.Add_Click({
     Write-Host ""
     Write-Host "[INFO] Container is starting up..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
     
-    # Get options from form
-    $useVolumes = $checkBoxVolumes.Checked
+    # Get options from form and store in script scope
+    $script:useVolumes = $checkBoxVolumes.Checked
+    $useVolumes = $script:useVolumes  # Keep local copy for backwards compatibility
     $portOverride = $textBoxPort.Text.Trim()
     $customParams = $textBoxParams.Text.Trim()
     $SimDesignYAML = $textBoxSimDesign.Text.Trim()
@@ -3015,12 +3026,16 @@ $buttonStart.Add_Click({
     # Get user identity information for non-root Docker execution
     # Note: On Windows, Docker Desktop runs containers in a Linux VM, so we use
     # default UID/GID (1000:1000) which works well for most cases
-    $UserId = 1000 #TODO: Check SSH user implementation to avoid root access? See ChatGPT suggestions.
-    $GroupId = 1000
+    $script:UserId = 1000 #TODO: Check SSH user implementation to avoid root access? See ChatGPT suggestions.
+    $script:GroupId = 1000
+    $UserId = $script:UserId   # Keep local copy for backwards compatibility
+    $GroupId = $script:GroupId # Keep local copy for backwards compatibility
 
     # Define user-specific Docker volume names using sanitized username (only for output and synthpop)
-    $VolumeOutput    = "impactncd_germany_output_$SafeCurrentUser"
-    $VolumeSynthpop  = "impactncd_germany_synthpop_$SafeCurrentUser"
+    $script:VolumeOutput = "impactncd_germany_output_$SafeCurrentUser"
+    $script:VolumeSynthpop = "impactncd_germany_synthpop_$SafeCurrentUser"
+    $VolumeOutput = $script:VolumeOutput     # Keep local copy for backwards compatibility
+    $VolumeSynthpop = $script:VolumeSynthpop # Keep local copy for backwards compatibility
 
     # TODO: Logic for synthpop and output folders on local and remote POTENTIAL IMPLICATIONS FOR USER CREATION ETC!    
     # Replace backwards with forward slashes in ProjectRoot for Docker compatibility
@@ -3029,10 +3044,12 @@ $buttonStart.Add_Click({
     # Call the function passing $ProjectRoot
     Write-Host ""
     Write-Host ""
-    $outputDir    = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
+    $script:outputDir = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
+    $outputDir = $script:outputDir  # Keep local copy for backwards compatibility
     Write-Host ""
     Write-Host ""
-    $synthpopDir  = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
+    $script:synthpopDir = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
+    $synthpopDir = $script:synthpopDir  # Keep local copy for backwards compatibility
     Write-Host ""
     Write-Host ""
 
@@ -3079,7 +3096,8 @@ $buttonStart.Add_Click({
         }
         
         # Build rsync-alpine image if it doesn't already exist.
-        $rsyncImage = "rsync-alpine"
+        $script:rsyncImage = "rsync-alpine"
+        $rsyncImage = $script:rsyncImage  # Keep local copy for backwards compatibility
         & docker image inspect $rsyncImage > $null 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[INFO] Building rsync-alpine image..." -ForegroundColor Cyan
@@ -3124,7 +3142,7 @@ RUN apk add --no-cache rsync
 
         # Pre-populate volumes:
         # The output and synthpop volumes are populated from the respective local folders.
-        Write-Host "[INFO] Populating output volume from local folder..." -ForegroundColor Cyan
+        
         # Use permission-tolerant copy with fallback logic
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             # For local Windows, convert paths for Docker
@@ -3420,7 +3438,7 @@ $buttonStop.Add_Click({
                     Write-Host "[SUCCESS] Container confirmed stopped." -ForegroundColor Green
                     Write-Host ""
                     
-                    if ($useVolumes) {
+                    if ($script:useVolumes) {
                         Write-Host ""
                         # After the container exits:
                         # Synchronize the output and synthpop volumes back to the local directories using rsync.
@@ -3430,31 +3448,31 @@ $buttonStop.Add_Click({
                         # Configure paths based on execution location
                         if ($CONTAINER_LOCATION -eq "LOCAL") {
                             # For local Windows, convert paths for Docker
-                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $outputDir
-                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $synthpopDir
+                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $script:outputDir
+                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $script:synthpopDir
                         } else {
                             # For remote Linux, use paths directly
-                            $dockerOutputBackup = $outputDir
-                            $dockerSynthpopBackup = $synthpopDir
+                            $dockerOutputBackup = $script:outputDir
+                            $dockerSynthpopBackup = $script:synthpopDir
                         }
                         
                         # Use ${} to delimit variable name before the colon and add permission flags
                         # Added --no-perms and --chmod=ugo=rwX to prevent permission issues on Windows
-                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeOutput}:/volume" -v "${dockerOutputBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
-                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeSynthpop}:/volume" -v "${dockerSynthpopBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                         Write-Host ""
 
                         # Clean up all the Docker volumes used for the simulation.
                         Write-Host "[INFO] Cleaning up Docker volumes..." -ForegroundColor Cyan
-                        & docker volume rm $VolumeOutput | Out-Null
-                        & docker volume rm $VolumeSynthpop | Out-Null
+                        & docker volume rm $script:VolumeOutput | Out-Null
+                        & docker volume rm $script:VolumeSynthpop | Out-Null
                         Write-Host ""
                     }    
 
                     # Update UI state - container stopped successfully
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
                     
                     Write-Host ""
                     Write-Host "==============================================="
@@ -3488,31 +3506,31 @@ $buttonStop.Add_Click({
                     Write-Host ""
                     
                     # Handle volume cleanup for force stop too
-                    if ($useVolumes) {
+                    if ($script:useVolumes) {
                         Write-Host ""
                         Write-Host "[INFO] Force stopped - performing volume sync and cleanup..." -ForegroundColor Cyan
                         Write-Host ""
                         
                         # Configure paths based on execution location
                         if ($CONTAINER_LOCATION -eq "LOCAL") {
-                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $outputDir
-                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $synthpopDir
+                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $script:outputDir
+                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $script:synthpopDir
                         } else {
-                            $dockerOutputBackup = $outputDir
-                            $dockerSynthpopBackup = $synthpopDir
+                            $dockerOutputBackup = $script:outputDir
+                            $dockerSynthpopBackup = $script:synthpopDir
                         }
                         
                         # Quick sync and cleanup
-                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeOutput}:/volume" -v "${dockerOutputBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
-                        & docker run --rm --user "${UserId}:${GroupId}" -v "${VolumeSynthpop}:/volume" -v "${dockerSynthpopBackup}:/backup" $rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
-                        & docker volume rm $VolumeOutput $VolumeSynthpop -f 2>$null
+                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
+                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
+                        & docker volume rm $script:VolumeOutput $script:VolumeSynthpop -f 2>$null
                         Write-Host ""
                     }
                     
                     # Update UI state
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
                 } else {
                     Write-Host ""
                     Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'" -ForegroundColor Red
@@ -3536,7 +3554,7 @@ $buttonStop.Add_Click({
         # Container is already stopped - just update UI
         $buttonStart.Enabled = $true
         $buttonStop.Enabled = $false
-        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($useVolumes) { 'Enabled' } else { 'Disabled' })"
+        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
         
         Write-Host "[INFO] UI updated to reflect stopped state" -ForegroundColor Cyan
         Write-Host ""
