@@ -3492,7 +3492,7 @@ RUN apk add --no-cache rsync
             "-e", "PASSWORD=$PASSWORD",
             "-e", "DISABLE_AUTH=false",
             # Repo sync settings to update container based on changes
-            "--mount", "type=bind,source=$script:REPO_PATH,target=/host-repo,ro",
+            "--mount", "type=bind,source=$script:REPO_PATH,target=/host-repo",
             "-e", "REPO_SYNC_PATH=/host-repo",
             "-e", "SYNC_ENABLED=true",
             # Port mapping with override support
@@ -3601,7 +3601,7 @@ RUN apk add --no-cache rsync
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
                 # Repo sync settings to update container based on changes
-                "--mount", "type=bind,source=$script:LOCAL_REPO_PATH,target=/host-repo,ro",
+                "--mount", "type=bind,source=$script:LOCAL_REPO_PATH,target=/host-repo",
                 "-e", "REPO_SYNC_PATH=/host-repo",
                 "-e", "SYNC_ENABLED=true",
                 # Port mapping with override support
