@@ -2306,6 +2306,138 @@ function Show-GitCommitDialog {
         BackColor = [System.Drawing.Color]::LightGray
     }
     
+    # Retry Push button (initially hidden)
+    $retryPushButton = New-Object System.Windows.Forms.Button -Property @{
+        Text = "Retry Push"
+        Location = New-Object System.Drawing.Point(250, 320)
+        Size = New-Object System.Drawing.Size(90, 30)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        BackColor = [System.Drawing.Color]::LightBlue
+        Visible = $false
+    }
+    
+    # Open in VS Code button (initially hidden)
+    $openVSCodeButton = New-Object System.Windows.Forms.Button -Property @{
+        Text = "Open in VS Code"
+        Location = New-Object System.Drawing.Point(140, 320)
+        Size = New-Object System.Drawing.Size(100, 30)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        BackColor = [System.Drawing.Color]::LightCyan
+        Visible = $false
+    }
+    
+    # Function to perform git push with better error handling
+    function Invoke-GitPush {
+        param($RepoPath, $StatusLabel, $CommitForm)
+        
+        try {
+            Push-Location $RepoPath
+            
+            $StatusLabel.Text = "Status: Pushing to remote repository..."
+            $StatusLabel.ForeColor = [System.Drawing.Color]::Blue
+            $CommitForm.Refresh()
+            
+            # First, try to get remote URL to determine if it's HTTPS or SSH
+            $remoteUrl = git remote get-url origin 2>$null
+            $isHttpsRepo = $remoteUrl -match "^https://"
+            $isSshRepo = $remoteUrl -match "^git@"
+            
+            # Configure git authentication based on repository type
+            if ($isSshRepo) {
+                # Use the same user-specific SSH key that the container uses
+                $userSshKeyPath = "${HOME}\.ssh\id_ed25519_${USERNAME}"
+                
+                if (Test-Path $userSshKeyPath) {
+                    Write-Host "[INFO] Using user-specific SSH key: $userSshKeyPath" -ForegroundColor Cyan
+                    # Set git SSH command to use the specific key (same as container)
+                    $env:GIT_SSH_COMMAND = "ssh -i `"$userSshKeyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+                } else {
+                    Write-Host "[WARNING] User SSH key not found at: $userSshKeyPath" -ForegroundColor Yellow
+                    Write-Host "[INFO] Trying default SSH configuration..." -ForegroundColor Cyan
+                }
+            } elseif ($isHttpsRepo) {
+                # For HTTPS repos, ensure credential helper is configured and update if using old manager
+                $credHelper = git config --get credential.helper 2>$null
+                if (-not $credHelper -or $credHelper -eq "manager-core") {
+                    Write-Host "[INFO] Configuring git credential helper for Windows..." -ForegroundColor Cyan
+                    # Use the newer git-credential-manager (GCM was renamed from manager-core)
+                    git config credential.helper manager 2>$null
+                }
+            }
+            
+            # Capture both stdout and stderr from git push
+            # Use env vars to disable interactive prompting for HTTPS repos only
+            if ($isHttpsRepo) {
+                $env:GIT_TERMINAL_PROMPT = "0"
+                $env:GIT_ASKPASS = "echo"
+            }
+            
+            $pushOutput = git push 2>&1
+            $pushExitCode = $LASTEXITCODE
+            
+            # Clean up environment variables
+            if ($isHttpsRepo) {
+                Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+                Remove-Item Env:GIT_ASKPASS -ErrorAction SilentlyContinue
+            }
+            if ($isSshRepo) {
+                Remove-Item Env:GIT_SSH_COMMAND -ErrorAction SilentlyContinue
+            }
+            
+            if ($pushExitCode -eq 0) {
+                $StatusLabel.Text = "Status: Successfully committed and pushed!"
+                $StatusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
+                $CommitForm.Refresh()
+                Start-Sleep -Seconds 2
+                $CommitForm.Close()
+                return $true
+            } else {
+                # Parse the error to provide more helpful feedback
+                $errorMessage = $pushOutput -join "`n"
+                Write-Host "[GIT PUSH ERROR] $errorMessage" -ForegroundColor Red
+                
+                # Provide specific error guidance based on error patterns
+                if ($errorMessage -match "git-credential-manager-core was renamed") {
+                    $StatusLabel.Text = "Status: Push failed - Git credential manager needs updating. Please update Git for Windows."
+                } elseif ($errorMessage -match "Invalid username or token|Password authentication is not supported") {
+                    $StatusLabel.Text = "Status: Push failed - GitHub token expired/invalid. Please re-authenticate in VS Code or update your Personal Access Token."
+                } elseif ($errorMessage -match "Authentication failed.*github\.com") {
+                    $StatusLabel.Text = "Status: Push failed - GitHub authentication failed. Please sign in to GitHub in VS Code."
+                } elseif ($errorMessage -match "Permission denied \(publickey\)|Host key verification failed") {
+                    if ($isSshRepo) {
+                        $StatusLabel.Text = "Status: Push failed - SSH key not added to GitHub. Please add your public key to GitHub."
+                    } else {
+                        $StatusLabel.Text = "Status: Push failed - SSH authentication failed."
+                    }
+                } elseif ($errorMessage -match "could not read Username|No such file or directory|/dev/tty: No such device") {
+                    if ($isHttpsRepo) {
+                        $StatusLabel.Text = "Status: Push failed - Git credentials not configured. Please run 'git push' manually in VS Code or terminal to authenticate."
+                    } else {
+                        $StatusLabel.Text = "Status: Push failed - SSH key authentication issue. Please check your SSH setup."
+                    }
+                } elseif ($errorMessage -match "Permission denied|Authentication failed") {
+                    $StatusLabel.Text = "Status: Push failed - Authentication failed. Please verify your credentials in VS Code."
+                } elseif ($errorMessage -match "non-fast-forward|failed to push some refs") {
+                    $StatusLabel.Text = "Status: Push failed - Remote has newer commits. Pull first, then retry."
+                } elseif ($errorMessage -match "Connection timed out|Network is unreachable") {
+                    $StatusLabel.Text = "Status: Push failed - Network issue. Check internet connection."
+                } else {
+                    $StatusLabel.Text = "Status: Push failed - Run 'git push' manually in VS Code terminal."
+                }
+                
+                $StatusLabel.ForeColor = [System.Drawing.Color]::Orange
+                return $false
+            }
+            
+        } catch {
+            $StatusLabel.Text = "Status: Push error - $($_.Exception.Message)"
+            $StatusLabel.ForeColor = [System.Drawing.Color]::Red
+            return $false
+        } finally {
+            Pop-Location
+        }
+    }
+    
     # Commit button click event
     $commitButton.Add_Click({
         $commitMessage = $messageTextBox.Text.Trim()
@@ -2316,10 +2448,12 @@ function Show-GitCommitDialog {
             return
         }
         
-        $statusLabel.Text = "Status: Committing and pushing..."
+        $statusLabel.Text = "Status: Committing changes..."
         $statusLabel.ForeColor = [System.Drawing.Color]::Blue
         $commitButton.Enabled = $false
         $skipButton.Enabled = $false
+        $retryPushButton.Visible = $false
+        $openVSCodeButton.Visible = $false
         
         try {
             Push-Location $RepoPath
@@ -2328,42 +2462,80 @@ function Show-GitCommitDialog {
             $statusLabel.Text = "Status: Creating commit..."
             $commitForm.Refresh()
             
-            git commit -m $commitMessage 2>&1 | Out-Null
+            $commitOutput = git commit -m $commitMessage 2>&1
             
             if ($LASTEXITCODE -eq 0) {
                 $statusLabel.Text = "Status: Commit successful. Pushing..."
                 $statusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
                 $commitForm.Refresh()
                 
-                # Push the changes
-                git push 2>&1 | Out-Null
+                # Try to push
+                $pushSuccess = Invoke-GitPush -RepoPath $RepoPath -StatusLabel $statusLabel -CommitForm $commitForm
                 
-                if ($LASTEXITCODE -eq 0) {
-                    $statusLabel.Text = "Status: Successfully committed and pushed!"
-                    $statusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
-                    $commitForm.Refresh()
-                    Start-Sleep -Seconds 2
-                    $commitForm.Close()
-                } else {
-                    $statusLabel.Text = "Status: Commit successful, but push failed. Please push manually."
-                    $statusLabel.ForeColor = [System.Drawing.Color]::Orange
+                if (-not $pushSuccess) {
+                    # Show retry button and re-enable other buttons
+                    $retryPushButton.Visible = $true
+                    
+                    # Show VS Code button for credential-related errors
+                    if ($statusLabel.Text -match "credentials not configured|authentication issue|SSH key|VS Code") {
+                        $openVSCodeButton.Visible = $true
+                    }
+                    
+                    $commitButton.Text = "Commit Only"
                     $commitButton.Enabled = $true
+                    $skipButton.Text = "Done"
                     $skipButton.Enabled = $true
                 }
+                
             } else {
-                $statusLabel.Text = "Status: Commit failed. Please check git status."
+                $commitError = $commitOutput -join "`n"
+                Write-Host "[GIT COMMIT ERROR] $commitError" -ForegroundColor Red
+                $statusLabel.Text = "Status: Commit failed - $($commitError.Split("`n")[0])"
                 $statusLabel.ForeColor = [System.Drawing.Color]::Red
                 $commitButton.Enabled = $true
                 $skipButton.Enabled = $true
             }
             
         } catch {
-            $statusLabel.Text = "Status: Error during commit/push: $($_.Exception.Message)"
+            $statusLabel.Text = "Status: Error during commit: $($_.Exception.Message)"
             $statusLabel.ForeColor = [System.Drawing.Color]::Red
             $commitButton.Enabled = $true
             $skipButton.Enabled = $true
         } finally {
             Pop-Location
+        }
+    })
+    
+    # Retry Push button click event
+    $retryPushButton.Add_Click({
+        $retryPushButton.Enabled = $false
+        
+        $pushSuccess = Invoke-GitPush -RepoPath $RepoPath -StatusLabel $statusLabel -CommitForm $commitForm
+        
+        if (-not $pushSuccess) {
+            $retryPushButton.Enabled = $true
+        } else {
+            $retryPushButton.Visible = $false
+            $openVSCodeButton.Visible = $false
+        }
+    })
+    
+    # Open in VS Code button click event
+    $openVSCodeButton.Add_Click({
+        try {
+            # Try to open the repository in VS Code
+            $statusLabel.Text = "Status: Opening repository in VS Code..."
+            $statusLabel.ForeColor = [System.Drawing.Color]::Blue
+            $commitForm.Refresh()
+            
+            Start-Process "code" -ArgumentList $RepoPath -ErrorAction Stop
+            
+            $statusLabel.Text = "Status: Repository opened in VS Code. You can push manually there."
+            $statusLabel.ForeColor = [System.Drawing.Color]::Green
+            
+        } catch {
+            $statusLabel.Text = "Status: Could not open VS Code. Please open the repository manually."
+            $statusLabel.ForeColor = [System.Drawing.Color]::Orange
         }
     })
     
@@ -2374,6 +2546,8 @@ function Show-GitCommitDialog {
     
     $commitForm.Controls.Add($commitButton)
     $commitForm.Controls.Add($skipButton)
+    $commitForm.Controls.Add($retryPushButton)
+    $commitForm.Controls.Add($openVSCodeButton)
     
     # Focus on the commit message textbox
     $messageTextBox.Select()
@@ -3316,14 +3490,7 @@ $buttonStart.Add_Click({
         $script:gitStateBeforeContainer = $null
         $script:gitRepoPath = $null
     }
-    Write-Host "[DEBUG] gitStateBeforeContainer: $($script:gitStateBeforeContainer | Out-String)"
-    Write-Host "[DEBUG]"
-    Write-Host "[DEBUG]"
-    Write-Host "[DEBUG]"
-    Write-Host "$($null -eq $script:gitStateBeforeContainer)"
-    Write-Host "[DEBUG]"
-    Write-Host "[DEBUG]"
-    Write-Host "[DEBUG]"
+    Write-Host ""
 
     #-------------------------------------------------------#
     #    Prepare directories and Docker mounts if needed    #
