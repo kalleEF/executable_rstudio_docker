@@ -3148,10 +3148,13 @@ RUN apk add --no-cache rsync
             # For local Windows, convert paths for Docker
             $dockerOutputSource = Convert-PathToDockerFormat -Path $outputDir
             $dockerSynthpopSource = Convert-PathToDockerFormat -Path $synthpopDir
+            $script:REPO_PATH = $script:LOCAL_REPO_PATH
         } else {
             # For remote Linux, use paths directly
             $dockerOutputSource = $outputDir
             $dockerSynthpopSource = $synthpopDir
+            $script:REPO_PATH = $script:REMOTE_REPO_PATH
+
         }
 
         Write-Host "[INFO] Populating output volume from local folder..." -ForegroundColor Cyan
@@ -3174,16 +3177,20 @@ RUN apk add --no-cache rsync
             "-e", "GROUPID=$GroupId",
             "-e", "PASSWORD=$PASSWORD",
             "-e", "DISABLE_AUTH=false",
+            # Repo sync settings to update container based on changes
+            "--mount", "type=bind,source=$script:REPO_PATH,target=/host-repo,ro",
+            "-e", "REPO_SYNC_PATH=/host-repo",
+            "-e", "SYNC_ENABLED=true",
             # Port mapping with override support
             "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
             # Directory mounts
-            "-v", "${VolumeOutput}:/home/rstudio/IMPACTncd_Germany/outputs",
-            "-v", "${VolumeSynthpop}:/home/rstudio/IMPACTncd_Germany/inputs/synthpop",
+            "-v", "${VolumeOutput}:/home/rstudio/$script:SELECTED_REPO/outputs",
+            "-v", "${VolumeSynthpop}:/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
             # SSH key and known_hosts for git access (Windows paths)
             "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
             "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
             # Working directory
-            "--workdir", "/home/rstudio/IMPACTncd_Germany"
+            "--workdir", "/home/rstudio/$script:SELECTED_REPO"
         )
 
         # Add final argument
@@ -3279,16 +3286,20 @@ RUN apk add --no-cache rsync
                 "-e", "GROUPID=$GroupId",
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
+                # Repo sync settings to update container based on changes
+                "--mount", "type=bind,source=$script:LOCAL_REPO_PATH,target=/host-repo,ro",
+                "-e", "REPO_SYNC_PATH=/host-repo",
+                "-e", "SYNC_ENABLED=true",
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts
-                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/IMPACTncd_Germany/outputs",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/IMPACTncd_Germany/inputs/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SELECTED_REPO/outputs",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
                 # SSH key and known_hosts for git access (Windows paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
                 # Working directory
-                "--workdir", "/home/rstudio/IMPACTncd_Germany"
+                "--workdir", "/home/rstudio/$script:SELECTED_REPO"
             )
             
         } else {
@@ -3318,16 +3329,20 @@ RUN apk add --no-cache rsync
                 "-e", "GROUPID=$GroupId",
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
+                # Repo sync settings to update container based on changes
+                "--mount", "type=bind,source=$script:REMOTE_REPO_PATH,target=/host-repo,ro",
+                "-e", "REPO_SYNC_PATH=/host-repo",
+                "-e", "SYNC_ENABLED=true",
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts (Unix paths)
-                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/IMPACTncd_Germany/outputs",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/IMPACTncd_Germany/inputs/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SELECTED_REPO/outputs",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
                 # SSH key and known_hosts for git access (Linux paths)
                 "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
                 "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
                 # Working directory
-                "--workdir", "/home/rstudio/IMPACTncd_Germany"
+                "--workdir", "/home/rstudio/$script:SELECTED_REPO"
             )
         }
 
@@ -3561,6 +3576,12 @@ $buttonStop.Add_Click({
     }
 })
 
+<#
+Logic to ensure changes inside the container are pushed to github and pulled to the local machine
+#>
+
+
+
 $buttonOK.Add_Click({
     Write-Host ""
     Write-Host "[INFO] Container management dialog closed" -ForegroundColor Cyan
@@ -3582,32 +3603,6 @@ Write-Host ""
 Logic:
     8. If the user closes the script while the container is running we prompt them to stop the container first
 #>
-
-#-----------------------------------------------------------------------#
-#   STEP 5.1: IF REMOTE - LOGIC FOR MOUNTING FOLDERS AND COPY SSH KEY   #
-#-----------------------------------------------------------------------#
-
-<# 
-Logic:
-    1. Collect everything that needs to be mounted locally
-    2. This includes the GitHub SSH key that is needed to clone/pull/push from inside RStudio
-    3. Save all mounts into a dockerargs variable
-    4. Integrate into Chris code including the UseVolumes option
-#>
-
-#----------------------------------------------------------------------#
-#   STEP 5.2: IF LOCAL - LOGIC FOR MOUNTING FOLDERS AND COPY SSH KEY   #
-#----------------------------------------------------------------------#
-
-<# 
-Logic:
-    1. Collect everything that needs to be mounted locally
-    2. This includes the GitHub SSH key that is needed to clone/pull/push from inside RStudio
-    3. Optional: Enable users to mount additional local folders if needed
-    4. Save all mounts into a dockerargs variable
-    5. Integrate into Chris code including the UseVolumes option
-#>
-
 
 #------------------------------------------------#
 #   STEP 6: PROMPT AND LOGIC FOR GITHUB PROMPT   #
