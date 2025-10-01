@@ -2336,6 +2336,15 @@ $checkBoxVolumes = New-Object System.Windows.Forms.CheckBox -Property @{
 }
 $formContainer.Controls.Add($checkBoxVolumes)
 
+# Rebuild image checkbox option
+$checkBoxRebuild = New-Object System.Windows.Forms.CheckBox -Property @{
+    Text = 'Rebuild repo image (force rebuild even if exists)'
+    Location = New-Object System.Drawing.Point(230,185)
+    Size = New-Object System.Drawing.Size(250,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+}
+$formContainer.Controls.Add($checkBoxRebuild)
+
 # Port override label and textbox
 $labelPort = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Port Override:'
@@ -2417,12 +2426,15 @@ $buttonStart.Add_Click({
     # Get options from form and store in script scope
     $script:useVolumes = $checkBoxVolumes.Checked
     $useVolumes = $script:useVolumes  # Keep local copy for backwards compatibility
+    $script:rebuildImage = $checkBoxRebuild.Checked
+    $rebuildImage = $script:rebuildImage  # Keep local copy for backwards compatibility
     $portOverride = $textBoxPort.Text.Trim()
     $customParams = $textBoxParams.Text.Trim()
     $SimDesignYAML = $textBoxSimDesign.Text.Trim()
     
     Write-Host "  Advanced Options:"
     Write-Host "    Use Volumes: $useVolumes"
+    Write-Host "    Rebuild Image: $rebuildImage"
     Write-Host "    Port Override: $(if($portOverride) { $portOverride } else { 'Default' })"
     Write-Host "    Custom Parameters: $(if($customParams) { $customParams } else { 'None' })"
     Write-Host "    sim_design.yaml file: $(if($SimDesignYAML) { $SimDesignYAML } else { 'Default' })"
@@ -2484,29 +2496,39 @@ $buttonStart.Add_Click({
     Write-Host "[INFO] Checking if a Docker image for your repo (e.g. $DockerImageName) already exists..." -ForegroundColor Cyan
     Write-Host ""
 
-    # Check if image exists
+    # Check if image exists (unless rebuild is forced)
     $imageExists = $false
-    try {
-        if ($CONTAINER_LOCATION -eq "LOCAL") {
-            # Check locally
-            $imageCheck = & docker images --format "{{.Repository}}" | Where-Object { $_ -eq $DockerImageName }
-            $imageExists = $null -ne $imageCheck
-        } else {
-            # Check on remote host
-            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-            $imageCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker images --format '{{.Repository}}' | grep -q '^$DockerImageName$' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
-            $imageExists = $imageCheck -match "EXISTS"
-        }
-    } catch {
-        Write-Host "[WARNING] Could not check for existing Docker image: $($_.Exception.Message)" -ForegroundColor Yellow
+    if ($rebuildImage) {
+        Write-Host "[INFO] Force rebuild is enabled - will rebuild image even if it exists" -ForegroundColor Cyan
+        Write-Host ""
         $imageExists = $false
+    } else {
+        try {
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                # Check locally
+                $imageCheck = & docker images --format "{{.Repository}}" | Where-Object { $_ -eq $DockerImageName }
+                $imageExists = $null -ne $imageCheck
+            } else {
+                # Check on remote host
+                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $imageCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker images --format '{{.Repository}}' | grep -q '^$DockerImageName$' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+                $imageExists = $imageCheck -match "EXISTS"
+            }
+        } catch {
+            Write-Host "[WARNING] Could not check for existing Docker image: $($_.Exception.Message)" -ForegroundColor Yellow
+            $imageExists = $false
+        }
     }
 
     if ($imageExists) {
         Write-Host "[SUCCESS] Docker image '$DockerImageName' that can be used for your container already exists" -ForegroundColor Green
         Write-Host ""
     } else {
-        Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..." -ForegroundColor Cyan
+        if ($rebuildImage) {
+            Write-Host "[INFO] Rebuilding Docker image '$DockerImageName' as requested (force rebuild enabled)..." -ForegroundColor Cyan
+        } else {
+            Write-Host "[INFO] Docker image '$DockerImageName' does not exist, building from Dockerfile..." -ForegroundColor Cyan
+        }
         Write-Host ""
 
         # Determine Dockerfile path for model image build
