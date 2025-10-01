@@ -2120,6 +2120,269 @@ function Convert-PathToDockerFormat {
     }
 }
 
+# 4: Helper function to capture git repository state
+function Get-GitRepositoryState {
+    param([string]$RepoPath)
+    
+    if (-not (Test-Path $RepoPath)) {
+        Write-Host "[WARNING] Repository path does not exist: $RepoPath" -ForegroundColor Yellow
+        return $null
+    }
+    
+    try {
+        Push-Location $RepoPath
+        
+        # Check if this is a git repository
+        $isGitRepo = git rev-parse --is-inside-work-tree 2>$null
+        if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
+            Write-Host "[INFO] Not a git repository or git not available" -ForegroundColor Cyan
+            return $null
+        }
+        
+        # Get current commit hash
+        $currentCommit = git rev-parse HEAD 2>$null
+        
+        # Get list of modified/added/deleted files
+        $gitStatus = git status --porcelain 2>$null
+        
+        # Get list of untracked files
+        $untrackedFiles = git ls-files --others --exclude-standard 2>$null
+        
+        $state = @{
+            RepoPath = $RepoPath
+            CurrentCommit = $currentCommit
+            ModifiedFiles = ($gitStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+            UntrackedFiles = ($untrackedFiles -split "`n" | Where-Object { $_.Trim() -ne "" })
+            Timestamp = Get-Date
+        }
+        
+        Write-Host "[INFO] Captured git state: $($state.ModifiedFiles.Count) modified, $($state.UntrackedFiles.Count) untracked files" -ForegroundColor Green
+        return $state
+        
+    } catch {
+        Write-Host "[WARNING] Error capturing git state: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $null
+    } finally {
+        Pop-Location
+    }
+}
+
+# 5: Helper function to check for git changes and prompt for commit
+function Invoke-GitChangeDetection {
+    param([string]$RepoPath)
+    
+    Write-Host "[INFO] Checking for git changes after container execution..." -ForegroundColor Cyan
+    
+    if (-not $script:gitStateBeforeContainer) {
+        Write-Host "[INFO] No git state was captured before container start - skipping change detection" -ForegroundColor Cyan
+        return
+    }
+    
+    $currentState = Get-GitRepositoryState -RepoPath $RepoPath
+    if (-not $currentState) {
+        Write-Host "[INFO] Could not get current git state - skipping change detection" -ForegroundColor Cyan
+        return
+    }
+    
+    try {
+        Push-Location $RepoPath
+        
+        # Get current status
+        $currentStatus = git status --porcelain 2>$null
+        $currentFiles = ($currentStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+        
+        # Check if there are any changes
+        if ($currentFiles.Count -eq 0) {
+            Write-Host "[INFO] No git changes detected after container execution" -ForegroundColor Green
+            return
+        }
+        
+        Write-Host "[INFO] Git changes detected! Found $($currentFiles.Count) modified/new files:" -ForegroundColor Yellow
+        foreach ($file in $currentFiles) {
+            Write-Host "  $file" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        
+        # Stage all changes
+        Write-Host "[INFO] Staging all changes..." -ForegroundColor Cyan
+        git add -A 2>$null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[SUCCESS] Changes staged successfully" -ForegroundColor Green
+            
+            # Show the commit dialog
+            Show-GitCommitDialog -RepoPath $RepoPath
+            
+        } else {
+            Write-Host "[ERROR] Failed to stage changes" -ForegroundColor Red
+        }
+        
+    } catch {
+        Write-Host "[ERROR] Error during git change detection: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        Pop-Location
+    }
+}
+
+# 6: Helper function to show git commit dialog
+function Show-GitCommitDialog {
+    param([string]$RepoPath)
+    
+    # Create the commit dialog form
+    $commitForm = New-Object System.Windows.Forms.Form -Property @{
+        Text = "Git Commit & Push"
+        Size = New-Object System.Drawing.Size(600, 400)
+        StartPosition = "CenterScreen"
+        MaximizeBox = $false
+        MinimizeBox = $false
+        FormBorderStyle = "FixedDialog"
+        TopMost = $true
+    }
+    
+    # Title label
+    $titleLabel = New-Object System.Windows.Forms.Label -Property @{
+        Text = "Git Changes Detected"
+        Location = New-Object System.Drawing.Point(20, 20)
+        Size = New-Object System.Drawing.Size(560, 30)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 12, [System.Drawing.FontStyle]::Bold)
+        ForeColor = [System.Drawing.Color]::DarkBlue
+    }
+    $commitForm.Controls.Add($titleLabel)
+    
+    # Info label
+    $infoLabel = New-Object System.Windows.Forms.Label -Property @{
+        Text = "Changes have been detected and staged. Enter a commit message:"
+        Location = New-Object System.Drawing.Point(20, 60)
+        Size = New-Object System.Drawing.Size(560, 20)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    }
+    $commitForm.Controls.Add($infoLabel)
+    
+    # Commit message label
+    $messageLabel = New-Object System.Windows.Forms.Label -Property @{
+        Text = "Commit Message:"
+        Location = New-Object System.Drawing.Point(20, 90)
+        Size = New-Object System.Drawing.Size(150, 20)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    }
+    $commitForm.Controls.Add($messageLabel)
+    
+    # Commit message textbox
+    $messageTextBox = New-Object System.Windows.Forms.TextBox -Property @{
+        Location = New-Object System.Drawing.Point(20, 115)
+        Size = New-Object System.Drawing.Size(540, 120)
+        Multiline = $true
+        ScrollBars = "Vertical"
+        Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Regular)
+        Text = "Update after container execution"
+    }
+    $commitForm.Controls.Add($messageTextBox)
+    
+    # Status label
+    $statusLabel = New-Object System.Windows.Forms.Label -Property @{
+        Text = "Status: Ready to commit"
+        Location = New-Object System.Drawing.Point(20, 250)
+        Size = New-Object System.Drawing.Size(540, 60)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        ForeColor = [System.Drawing.Color]::DarkGreen
+    }
+    $commitForm.Controls.Add($statusLabel)
+    
+    # Commit & Push button
+    $commitButton = New-Object System.Windows.Forms.Button -Property @{
+        Text = "Commit & Push"
+        Location = New-Object System.Drawing.Point(350, 320)
+        Size = New-Object System.Drawing.Size(120, 30)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        BackColor = [System.Drawing.Color]::LightGreen
+    }
+    
+    # Skip button
+    $skipButton = New-Object System.Windows.Forms.Button -Property @{
+        Text = "Skip"
+        Location = New-Object System.Drawing.Point(480, 320)
+        Size = New-Object System.Drawing.Size(80, 30)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        BackColor = [System.Drawing.Color]::LightGray
+    }
+    
+    # Commit button click event
+    $commitButton.Add_Click({
+        $commitMessage = $messageTextBox.Text.Trim()
+        
+        if ([string]::IsNullOrEmpty($commitMessage)) {
+            $statusLabel.Text = "Status: Please enter a commit message"
+            $statusLabel.ForeColor = [System.Drawing.Color]::Red
+            return
+        }
+        
+        $statusLabel.Text = "Status: Committing and pushing..."
+        $statusLabel.ForeColor = [System.Drawing.Color]::Blue
+        $commitButton.Enabled = $false
+        $skipButton.Enabled = $false
+        
+        try {
+            Push-Location $RepoPath
+            
+            # Commit the changes
+            $statusLabel.Text = "Status: Creating commit..."
+            $commitForm.Refresh()
+            
+            git commit -m $commitMessage 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -eq 0) {
+                $statusLabel.Text = "Status: Commit successful. Pushing..."
+                $statusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
+                $commitForm.Refresh()
+                
+                # Push the changes
+                git push 2>&1 | Out-Null
+                
+                if ($LASTEXITCODE -eq 0) {
+                    $statusLabel.Text = "Status: Successfully committed and pushed!"
+                    $statusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
+                    $commitForm.Refresh()
+                    Start-Sleep -Seconds 2
+                    $commitForm.Close()
+                } else {
+                    $statusLabel.Text = "Status: Commit successful, but push failed. Please push manually."
+                    $statusLabel.ForeColor = [System.Drawing.Color]::Orange
+                    $commitButton.Enabled = $true
+                    $skipButton.Enabled = $true
+                }
+            } else {
+                $statusLabel.Text = "Status: Commit failed. Please check git status."
+                $statusLabel.ForeColor = [System.Drawing.Color]::Red
+                $commitButton.Enabled = $true
+                $skipButton.Enabled = $true
+            }
+            
+        } catch {
+            $statusLabel.Text = "Status: Error during commit/push: $($_.Exception.Message)"
+            $statusLabel.ForeColor = [System.Drawing.Color]::Red
+            $commitButton.Enabled = $true
+            $skipButton.Enabled = $true
+        } finally {
+            Pop-Location
+        }
+    })
+    
+    # Skip button click event
+    $skipButton.Add_Click({
+        $commitForm.Close()
+    })
+    
+    $commitForm.Controls.Add($commitButton)
+    $commitForm.Controls.Add($skipButton)
+    
+    # Focus on the commit message textbox
+    $messageTextBox.Select()
+    $messageTextBox.SelectAll()
+    
+    # Show the dialog
+    $commitForm.ShowDialog() | Out-Null
+}
+
 # Set repository/model and user-specific name for Docker container
 $CONTAINER_NAME = "$($script:SELECTED_REPO)_$USERNAME"
 
@@ -3033,6 +3296,35 @@ $buttonStart.Add_Click({
         }
     }
 
+    # Capture git state before starting container for change detection
+    Write-Host "[INFO] Capturing git state for change detection..." -ForegroundColor Cyan
+    
+    # Determine which repository path to use for git operations
+    if (Test-Path $script:LOCAL_REPO_PATH) {
+        $gitRepoPath = $script:LOCAL_REPO_PATH
+    } elseif (Test-Path $script:REMOTE_REPO_PATH) {
+        $gitRepoPath = $script:REMOTE_REPO_PATH
+    } else {
+        Write-Host "[WARNING] No valid repository path found for git operations" -ForegroundColor Yellow
+        $gitRepoPath = $null
+    }
+    
+    if ($gitRepoPath) {
+        $script:gitStateBeforeContainer = Get-GitRepositoryState -RepoPath $gitRepoPath
+        $script:gitRepoPath = $gitRepoPath  # Store for later use in stop handler
+    } else {
+        $script:gitStateBeforeContainer = $null
+        $script:gitRepoPath = $null
+    }
+    Write-Host "[DEBUG] gitStateBeforeContainer: $($script:gitStateBeforeContainer | Out-String)"
+    Write-Host "[DEBUG]"
+    Write-Host "[DEBUG]"
+    Write-Host "[DEBUG]"
+    Write-Host "$($null -eq $script:gitStateBeforeContainer)"
+    Write-Host "[DEBUG]"
+    Write-Host "[DEBUG]"
+    Write-Host "[DEBUG]"
+
     #-------------------------------------------------------#
     #    Prepare directories and Docker mounts if needed    #
     #-------------------------------------------------------#
@@ -3524,6 +3816,11 @@ $buttonStop.Add_Click({
                     Write-Host "==============================================="
                     Write-Host ""
                     
+                    # Check for git changes after container stops
+                    if ($script:gitRepoPath) {
+                        Invoke-GitChangeDetection -RepoPath $script:gitRepoPath
+                    }
+                    
                 } else {
                     Write-Host ""
                     Write-Host "[WARNING] Container may still be running. Please check Docker Desktop$(if($CONTAINER_LOCATION -ne 'LOCAL') { ' on remote host' })." -ForegroundColor Yellow
@@ -3568,6 +3865,11 @@ $buttonStop.Add_Click({
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
                     $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
+                    
+                    # Check for git changes after force stop
+                    if ($script:gitRepoPath) {
+                        Invoke-GitChangeDetection -RepoPath $script:gitRepoPath
+                    }
                 } else {
                     Write-Host ""
                     Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'" -ForegroundColor Red
