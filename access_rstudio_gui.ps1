@@ -975,7 +975,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                         Write-Host ""
                         
                         # Get the public key content
-                        $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_docker_$USERNAME.pub"
+                        $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME.pub"
                         if (Test-Path $sshPublicKeyPath) {
                             $publicKeyContent = Get-Content $sshPublicKeyPath -Raw
                             $publicKeyContent = $publicKeyContent.Trim()
@@ -1244,11 +1244,12 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         $scanCommand = "find '$remoteRepoPath' -maxdepth 1 -type d -not -path '$remoteRepoPath' -exec basename {} \;"
         
-        # Use the authenticated SSH connection
+        # Use the authenticated SSH connection with specific key
+        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         Write-Host ""
-        Write-Host "    Executing: ssh $remoteHost '$scanCommand'"
+        Write-Host "    Executing: ssh with key $sshKeyPath to $remoteHost '$scanCommand'"
         Write-Host ""
-        $availableFolders = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $scanCommand 2>&1
+        $availableFolders = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $scanCommand 2>&1
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host ""
@@ -1398,7 +1399,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
         
         $gitCheckCommand = "test -d '$remoteRepoPath/$($script:SELECTED_REPO)/.git' && echo 'Git repository found' || echo 'No Git repository'"
-        $gitCheckResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $gitCheckCommand 2>&1
+        $gitCheckResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $gitCheckCommand 2>&1
         
         if ($gitCheckResult -match "Git repository found") {
             Write-Host ""
@@ -1458,7 +1459,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             }
         }
         
-        $dockerVersion = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker --version" 2>&1
+        $dockerVersion = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker --version" 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
             Write-Host "    [SUCCESS] Docker is available on remote host" -ForegroundColor Green
@@ -1469,7 +1470,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             Write-Host ""
             Write-Host "    [INFO] Checking remote Docker engine status..." -ForegroundColor Cyan
             Write-Host ""
-            & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
+            & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Host ""
                 Write-Host "    [WARNING] Docker engine is not running on remote host" -ForegroundColor Yellow
@@ -1482,14 +1483,14 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     Write-Host ""
                     Write-Host "    Checking if user can run Docker without sudo..."
                     Write-Host ""
-                    $dockerGroupCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "groups | grep -q docker && echo 'HAS_DOCKER_GROUP' || echo 'NO_DOCKER_GROUP'" 2>&1
+                    $dockerGroupCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "groups | grep -q docker && echo 'HAS_DOCKER_GROUP' || echo 'NO_DOCKER_GROUP'" 2>&1
                     
                     if ($dockerGroupCheck -match "HAS_DOCKER_GROUP") {
                         Write-Host ""
                         Write-Host "    [INFO] User is in docker group, trying Docker without sudo..." -ForegroundColor Cyan
                         Write-Host ""
                         # Try starting Docker service as regular user (if systemd allows)
-                        $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "systemctl --user start docker || echo 'USER_START_FAILED'" 2>&1
+                        $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "systemctl --user start docker || echo 'USER_START_FAILED'" 2>&1
                         if ($startResult -match "USER_START_FAILED") {
                             Write-Host ""
                             Write-Host "    [INFO] User-level start failed, need system-level Docker service" -ForegroundColor Cyan
@@ -1515,13 +1516,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         Write-Host ""
 
                         # Check if passwordless sudo is available for systemctl docker
-                        $sudoCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo -n systemctl status docker >/dev/null 2>&1 && echo 'SUDO_OK' || echo 'SUDO_NEEDS_PASSWORD'" 2>&1
+                        $sudoCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "sudo -n systemctl status docker >/dev/null 2>&1 && echo 'SUDO_OK' || echo 'SUDO_NEEDS_PASSWORD'" 2>&1
                         
                         if ($sudoCheck -match "SUDO_OK") {
                             Write-Host ""
                             Write-Host "    [SUCCESS] Passwordless sudo available for Docker service" -ForegroundColor Green
                             Write-Host ""
-                            $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "sudo systemctl start docker" 2>&1
+                            $startResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "sudo systemctl start docker" 2>&1
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host ""
                                 Write-Host "    [SUCCESS] Docker service started via sudo" -ForegroundColor Green
@@ -1566,7 +1567,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         $attempt++
                         Write-Host "    Checking remote Docker daemon status... ($attempt/$maxAttempts)" -NoNewline
                         
-                        & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
+                        & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
                         if ($LASTEXITCODE -eq 0) {
                             Write-Host " [SUCCESS]" -ForegroundColor Green
                             break
@@ -1588,7 +1589,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                     } while ($attempt -lt $maxAttempts)
                     
                     # Final check
-                    & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker info" 2>&1 | Out-Null
+                    & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host ""
                         Write-Host "    [SUCCESS] Remote Docker engine started successfully!" -ForegroundColor Green
@@ -2948,7 +2949,8 @@ $buttonStart.Add_Click({
             } else {
                 # Check on remote host
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                $imageCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "docker images --format '{{.Repository}}' | grep -q '^$DockerImageName$' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+                $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                $imageCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker images --format '{{.Repository}}' | grep -q '^$DockerImageName$' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                 $imageExists = $imageCheck -match "EXISTS"
             }
         } catch {
@@ -2990,7 +2992,8 @@ $buttonStart.Add_Click({
                 $dockerfileExists = Test-Path $dockerfilePath
             } else {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                $dockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "test -f '$dockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+                $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                $dockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -f '$dockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                 $dockerfileExists = $dockerfileCheck -match "EXISTS"
             }
         } catch {
