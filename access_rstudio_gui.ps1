@@ -740,7 +740,10 @@ $buttonRemote.Add_Click({
         Write-Host ""
         Write-Host "  [INFO] Testing SSH key authentication..." -ForegroundColor Cyan
         Write-Host ""
-        $sshTestResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
+        
+        # Use specific SSH key to avoid "Too many authentication failures"
+        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        $sshTestResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
         
         $SSHEXITCODE = $LASTEXITCODE
 
@@ -1054,7 +1057,8 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                 Write-Host "  [INFO] Testing passwordless SSH connection..." -ForegroundColor Cyan
                                 Start-Sleep -Seconds 2  # Give the remote system a moment to process the key
                                 
-                                $finalTest = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'Passwordless SSH successful'" 2>&1
+                                # Use specific SSH key for testing
+                                $finalTest = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'Passwordless SSH successful'" 2>&1
                                 if ($LASTEXITCODE -eq 0) {
                                     Write-Host ""
                                     Write-Host "  [SUCCESS] Passwordless SSH authentication confirmed!" -ForegroundColor Green
@@ -1152,7 +1156,9 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
         Write-Host "[INFO] Testing Docker availability on remote host..." -ForegroundColor Cyan
         Write-Host ""
 
-        $dockerTestResult = & ssh -o ConnectTimeout=10 $remoteHost "docker --version" 2>&1
+        # Use specific SSH key to avoid authentication failures
+        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        $dockerTestResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 $remoteHost "docker --version" 2>&1
         
         Write-Host ""
         Write-Host "[SUCCESS] Docker is available on remote host" -ForegroundColor Green
@@ -1193,6 +1199,14 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     Write-Host "  Location: REMOTE"
     Write-Host "  Target: $($script:REMOTE_HOST_IP)"
     Write-Host "  Mode: Remote Docker containers via SSH"
+    Write-Host ""
+    
+    # Set up global SSH environment for all remote Docker operations
+    $script:sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+    $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+    Write-Host "[INFO] Global SSH environment configured for Docker operations" -ForegroundColor Cyan
+    Write-Host "  SSH Key: $script:sshKeyPath" -ForegroundColor Cyan
+    Write-Host "  SSH Options: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
     Write-Host ""
 } else {
     Write-Host ""
@@ -1668,6 +1682,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host ""
 
     $RemoteContextName = "php_workstation"  # Name for the Docker context
+    $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Store globally for later use
 
     # Ensure we have the correct remote host for Docker context
     if ([string]::IsNullOrEmpty($remoteHost)) {
@@ -1684,23 +1699,170 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
     }
 
+    # Comprehensive SSH connectivity test before Docker context setup
+    Write-Host "    [INFO] Performing final SSH connectivity test for Docker context..." -ForegroundColor Cyan
+    $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+    
+    # Create SSH config entry for reliable Docker context authentication
+    Write-Host "    [INFO] Setting up SSH config for reliable Docker authentication..." -ForegroundColor Cyan
+    $sshConfigPath = "$HOME\.ssh\config"
+    $sshConfigDir = Split-Path $sshConfigPath -Parent
+    
+    # Ensure .ssh directory exists
+    if (-not (Test-Path $sshConfigDir)) {
+        New-Item -ItemType Directory -Path $sshConfigDir -Force | Out-Null
+    }
+    
+    # Extract hostname and user from remoteHost
+    if ($remoteHost -match "^(.+)@(.+)$") {
+        $sshUser = $matches[1]
+        $sshHostname = $matches[2]
+    } else {
+        $sshUser = "php-workstation"
+        $sshHostname = $remoteHost
+    }
+    
+    # Create SSH config entry
+    $sshConfigEntry = @"
+
+# Docker context SSH configuration for $remoteHost
+Host docker-$sshHostname
+    HostName $sshHostname
+    User $sshUser
+    IdentityFile $sshKeyPath
+    IdentitiesOnly yes
+    ConnectTimeout 30
+    StrictHostKeyChecking no
+
+"@
+    
+    # Check if config entry already exists
+    $configExists = $false
+    if (Test-Path $sshConfigPath) {
+        $existingConfig = Get-Content $sshConfigPath -Raw
+        if ($existingConfig -match "Host docker-$sshHostname") {
+            $configExists = $true
+            Write-Host "    [INFO] SSH config entry already exists for Docker context" -ForegroundColor Cyan
+        }
+    }
+    
+    if (-not $configExists) {
+        # Append to SSH config
+        Add-Content -Path $sshConfigPath -Value $sshConfigEntry
+        Write-Host "    [SUCCESS] Added SSH config entry for Docker context" -ForegroundColor Green
+    }
+    
+    # Test SSH with the exact same parameters Docker will use
+    Write-Host "    [INFO] Testing SSH with key: $sshKeyPath" -ForegroundColor Cyan
+    $sshConnectTest = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "echo 'SSH_OK_FOR_DOCKER' && docker --version" 2>&1
+    
+    if ($LASTEXITCODE -eq 0 -and $sshConnectTest -match "SSH_OK_FOR_DOCKER") {
+        Write-Host "    [SUCCESS] SSH connectivity confirmed for Docker context" -ForegroundColor Green
+        Write-Host "    SSH test output: $sshConnectTest" -ForegroundColor Green
+    } else {
+        Write-Host "    [ERROR] SSH connectivity failed for Docker context" -ForegroundColor Red
+        Write-Host "    SSH test output: $sshConnectTest" -ForegroundColor Red
+        Write-Host "    [INFO] Cannot proceed with Docker context setup due to SSH issues" -ForegroundColor Yellow
+        
+        [System.Windows.Forms.MessageBox]::Show(
+            "SSH connectivity test failed for Docker context setup.`n`n" +
+            "Error: $sshConnectTest`n`n" +
+            "Please ensure:`n" +
+            "1. SSH key is properly set up`n" +
+            "2. Remote host is accessible`n" +
+            "3. Docker is running on remote host",
+            "SSH Connectivity Error",
+            "OK",
+            "Error"
+        )
+        exit 1
+    }
+    Write-Host ""
+
     # Check if the context already exists
     Write-Host "    [INFO] Checking for existing Docker context..." -ForegroundColor Cyan
     $existing = & docker context ls --format '{{.Name}}' 2>$null
     $exists = $existing -contains $RemoteContextName
 
+    if ($exists) {
+        Write-Host "    [INFO] Context '$RemoteContextName' already exists - removing to recreate with proper SSH config..." -ForegroundColor Cyan
+        
+        # First, switch to default context to release the remote context
+        Write-Host "    [INFO] Switching to default context to release remote context..." -ForegroundColor Cyan
+        & docker context use default 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    [SUCCESS] Switched to default context" -ForegroundColor Green
+        } else {
+            Write-Host "    [WARNING] Could not switch to default context" -ForegroundColor Yellow
+        }
+        
+        # Now try to remove the remote context
+        Write-Host "    [INFO] Removing existing remote context..." -ForegroundColor Cyan
+        & docker context rm $RemoteContextName 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    [SUCCESS] Removed existing context" -ForegroundColor Green
+            $exists = $false  # Force recreation
+        } else {
+            Write-Host "    [WARNING] Could not remove existing context - attempting forced removal..." -ForegroundColor Yellow
+            & docker context rm --force $RemoteContextName 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "    [SUCCESS] Force removed existing context" -ForegroundColor Green
+                $exists = $false  # Force recreation
+            } else {
+                Write-Host "    [ERROR] Could not remove existing context even with force" -ForegroundColor Red
+                Write-Host "    [INFO] Will attempt to create with different name..." -ForegroundColor Cyan
+                $RemoteContextName = "php_workstation_new"  # Use different name as fallback
+                $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Update global variable
+                $exists = $false
+            }
+        }
+    }
+
     if (-not $exists) {
         Write-Host "    [INFO] Creating Docker context '$RemoteContextName' for ssh://$remoteHost..." -ForegroundColor Cyan
+        
+        # Use specific SSH key for Docker context to avoid authentication failures
+        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        
+        # Try using SSH config host alias for better authentication
+        if ($remoteHost -match "^(.+)@(.+)$") {
+            $sshUser = $matches[1]
+            $sshHostname = $matches[2]
+            $dockerSshHost = "ssh://docker-$sshHostname"
+            Write-Host "    [INFO] Using SSH config alias: docker-$sshHostname" -ForegroundColor Cyan
+        } else {
+            $dockerSshHost = "ssh://$remoteHost"
+        }
+        
+        # Set SSH options for Docker context (persist for all Docker operations)
+        $env:DOCKER_SSH_OPTS = "-i `"$sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+        Write-Host "    [INFO] Set DOCKER_SSH_OPTS: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
+        
+        Write-Host "    [INFO] Creating context with host: $dockerSshHost" -ForegroundColor Cyan
         & docker context create $RemoteContextName `
             --description "Remote Docker engine over SSH (Ubuntu 24.04)" `
-            --docker "host=ssh://$remoteHost"
+            --docker "host=$dockerSshHost"
+            
         if ($LASTEXITCODE -eq 0) {
             Write-Host "    [SUCCESS] Docker context created successfully" -ForegroundColor Green
+            $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Update global variable
         } else {
-            Write-Host "    [ERROR] Failed to create Docker context" -ForegroundColor Red
+            Write-Host "    [ERROR] Failed to create Docker context with SSH config alias" -ForegroundColor Red
+            Write-Host "    [INFO] Falling back to direct SSH host..." -ForegroundColor Cyan
+            
+            # Fallback to direct SSH host
+            $dockerSshHost = "ssh://$remoteHost"
+            & docker context create $RemoteContextName `
+                --description "Remote Docker engine over SSH (Ubuntu 24.04) - Direct" `
+                --docker "host=$dockerSshHost"
+                
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "    [SUCCESS] Docker context created with direct SSH" -ForegroundColor Green
+                $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Update global variable
+            } else {
+                Write-Host "    [ERROR] Failed to create Docker context" -ForegroundColor Red
+            }
         }
-    } else {
-        Write-Host "    [INFO] Context '$RemoteContextName' already exists" -ForegroundColor Cyan
     }
     Write-Host ""
 
@@ -1715,12 +1877,21 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host ""
 
     # Test remote Docker connection
-    Write-Host "    [INFO] Testing remote Docker connection..." -ForegroundColor Cyan
-    & docker --context $RemoteContextName version 2>&1 | Out-Null
+    Write-Host "    [INFO] Testing remote Docker connection with SSH key authentication..." -ForegroundColor Cyan
+    Write-Host "    [INFO] Using SSH options: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
+    
+    # Test with explicit context specification
+    $dockerTestOutput = & docker --context $RemoteContextName version 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    [SUCCESS] Remote Docker connection test passed" -ForegroundColor Green
+        Write-Host "    [INFO] Docker context is working correctly" -ForegroundColor Cyan
     } else {
         Write-Host "    [WARNING] Remote Docker connection test failed" -ForegroundColor Yellow
+        Write-Host "    Error details: $dockerTestOutput" -ForegroundColor Yellow
+        Write-Host "" 
+        Write-Host "    [INFO] This may be due to Docker context SSH configuration limitations" -ForegroundColor Cyan
+        Write-Host "    [INFO] Individual SSH commands work, but Docker context may need manual configuration" -ForegroundColor Cyan
+        Write-Host "    [INFO] Continuing - container operations may still work via direct SSH" -ForegroundColor Cyan
     }
     Write-Host ""
 
@@ -2029,6 +2200,21 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
 #  HELPER FUNCTIONS:  #
 #---------------------#
 
+# 0: Helper function to ensure SSH environment is set for remote Docker operations
+function Ensure-DockerSSHEnvironment {
+    if ($CONTAINER_LOCATION -like "REMOTE@*" -and (-not $env:DOCKER_SSH_OPTS -or [string]::IsNullOrEmpty($env:DOCKER_SSH_OPTS))) {
+        if ($script:sshKeyPath) {
+            $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+            Write-Host "[INFO] Restored SSH environment for Docker operations: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
+        } else {
+            # Fallback - reconstruct from USERNAME
+            $script:sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+            $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+            Write-Host "[INFO] Reconstructed SSH environment for Docker operations: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
+        }
+    }
+}
+
 # 1: Helper function to extract and construct potential paths from the YAML file
 function Get-YamlPathValue {
     param (
@@ -2036,9 +2222,36 @@ function Get-YamlPathValue {
         [string]$Key,
         [string]$BaseDir # Pass ProjectRoot here (already uses forward slashes)
     )
-    $line = Select-String -Path $YamlPath -Pattern "^$Key\s*:" | Select-Object -First 1
+    
+    # Handle remote vs local YAML file reading
+    if ($CONTAINER_LOCATION -like "REMOTE@*") {
+        # For remote operations, use SSH to read the YAML file
+        Ensure-DockerSSHEnvironment
+        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        
+        Write-Host "[INFO] Reading remote YAML file: $YamlPath" -ForegroundColor Cyan
+        $yamlContent = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cat '$YamlPath'" 2>$null
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Warning: Could not read remote YAML file: $YamlPath"
+            return $null
+        }
+        
+        # Find the line with the key
+        $line = $yamlContent -split "`n" | Where-Object { $_ -match "^$Key\s*:" } | Select-Object -First 1
+    } else {
+        # For local operations, use Select-String as before
+        if (-not (Test-Path $YamlPath)) {
+            Write-Host "Warning: Local YAML file not found: $YamlPath"
+            return $null
+        }
+        $lineObj = Select-String -Path $YamlPath -Pattern "^$Key\s*:" | Select-Object -First 1
+        $line = $lineObj.Line
+    }
+    
     if ($line) {
-        $value = ($line.Line -split ":\s*", 2)[1].Split("#")[0].Trim()
+        $value = ($line -split ":\s*", 2)[1].Split("#")[0].Trim()
         $constructedPath = $null
 
         # Check if the path from YAML is absolute (Windows or Unix-like)
@@ -2075,30 +2288,71 @@ function Test-AndCreateDirectory {
         return $false
     }
 
-    # Use native path format for Test-Path and New-Item
-    $NativePath = $Path -replace '/', '\\'
-
-    if (-not (Test-Path $NativePath)) {
-        Write-Host "Warning: $PathKey path not found: $NativePath. Creating directory..."
-        try {
-            New-Item -ItemType Directory -Path $NativePath -Force -ErrorAction Stop | Out-Null
-            Write-Host "Successfully created $PathKey directory: $NativePath"
-            return $true
-        } catch {
-            Write-Host "Error: Failed to create $PathKey directory: $NativePath - $($_.Exception.Message)"
-            # Attempt to resolve the path to see if it exists now, maybe a race condition or delay
-            if(Test-Path $NativePath) {
-                 Write-Host "Info: Directory $NativePath seems to exist now despite previous error."
-                 return $true
+    if ($CONTAINER_LOCATION -like "REMOTE@*") {
+        # For remote operations, use SSH to check and create directories
+        Ensure-DockerSSHEnvironment
+        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        
+        # Use Unix path format for remote operations (no conversion needed)
+        $remotePath = $Path
+        
+        Write-Host "[INFO] Checking remote directory: $remotePath" -ForegroundColor Cyan
+        $dirCheck = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -d '$remotePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>$null
+        
+        if ($dirCheck -match "NOT_EXISTS") {
+            Write-Host "Warning: Remote $PathKey path not found: $remotePath. Creating directory..."
+            $createResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "mkdir -p '$remotePath' && echo 'CREATED' || echo 'FAILED'" 2>$null
+            
+            if ($createResult -match "CREATED") {
+                Write-Host "Successfully created remote $PathKey directory: $remotePath"
+                return $true
+            } else {
+                Write-Host "Error: Failed to create remote $PathKey directory: $remotePath"
+                return $false
             }
+        } elseif ($dirCheck -match "EXISTS") {
+            # Check if it's actually a directory, not a file
+            $isDirCheck = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -d '$remotePath' && echo 'DIR' || echo 'FILE'" 2>$null
+            
+            if ($isDirCheck -match "FILE") {
+                Write-Host "Error: The remote path specified for $PathKey exists but is a file, not a directory: $remotePath"
+                return $false
+            } else {
+                Write-Host "[SUCCESS] Remote $PathKey directory exists: $remotePath" -ForegroundColor Green
+                return $true
+            }
+        } else {
+            Write-Host "Error: Could not check remote $PathKey directory: $remotePath"
             return $false
         }
-    } elseif (-not (Get-Item $NativePath).PSIsContainer) {
-        Write-Host "Error: The path specified for $PathKey exists but is a file, not a directory: $NativePath"
-        return $false
     } else {
-         # Directory exists
-         return $true
+        # Local operations - use existing logic
+        # Use native path format for Test-Path and New-Item
+        $NativePath = $Path -replace '/', '\\'
+
+        if (-not (Test-Path $NativePath)) {
+            Write-Host "Warning: $PathKey path not found: $NativePath. Creating directory..."
+            try {
+                New-Item -ItemType Directory -Path $NativePath -Force -ErrorAction Stop | Out-Null
+                Write-Host "Successfully created $PathKey directory: $NativePath"
+                return $true
+            } catch {
+                Write-Host "Error: Failed to create $PathKey directory: $NativePath - $($_.Exception.Message)"
+                # Attempt to resolve the path to see if it exists now, maybe a race condition or delay
+                if(Test-Path $NativePath) {
+                     Write-Host "Info: Directory $NativePath seems to exist now despite previous error."
+                     return $true
+                }
+                return $false
+            }
+        } elseif (-not (Get-Item $NativePath).PSIsContainer) {
+            Write-Host "Error: The path specified for $PathKey exists but is a file, not a directory: $NativePath"
+            return $false
+        } else {
+             # Directory exists
+             return $true
+        }
     }
 }
 
@@ -2125,46 +2379,96 @@ function Convert-PathToDockerFormat {
 function Get-GitRepositoryState {
     param([string]$RepoPath)
     
-    if (-not (Test-Path $RepoPath)) {
-        Write-Host "[WARNING] Repository path does not exist: $RepoPath" -ForegroundColor Yellow
-        return $null
-    }
-    
-    try {
-        Push-Location $RepoPath
-        
-        # Check if this is a git repository
-        $isGitRepo = git rev-parse --is-inside-work-tree 2>$null
-        if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
-            Write-Host "[INFO] Not a git repository or git not available" -ForegroundColor Cyan
+    if ($CONTAINER_LOCATION -like "REMOTE@*") {
+        # Handle remote repository paths
+        if (-not $RepoPath) {
+            Write-Host "[WARNING] No remote repository path provided" -ForegroundColor Yellow
             return $null
         }
         
-        # Get current commit hash
-        $currentCommit = git rev-parse HEAD 2>$null
-        
-        # Get list of modified/added/deleted files
-        $gitStatus = git status --porcelain 2>$null
-        
-        # Get list of untracked files
-        $untrackedFiles = git ls-files --others --exclude-standard 2>$null
-        
-        $state = @{
-            RepoPath = $RepoPath
-            CurrentCommit = $currentCommit
-            ModifiedFiles = ($gitStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
-            UntrackedFiles = ($untrackedFiles -split "`n" | Where-Object { $_.Trim() -ne "" })
-            Timestamp = Get-Date
+        try {
+            Ensure-DockerSSHEnvironment
+            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+            
+            Write-Host "[INFO] Checking remote git repository state: $RepoPath" -ForegroundColor Cyan
+            
+            # Check if this is a git repository
+            $isGitRepo = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git rev-parse --is-inside-work-tree" 2>$null
+            if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
+                Write-Host "[INFO] Remote path is not a git repository or git not available" -ForegroundColor Cyan
+                return $null
+            }
+            
+            # Get current commit hash
+            $currentCommit = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git rev-parse HEAD" 2>$null
+            
+            # Get list of modified/added/deleted files
+            $gitStatus = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git status --porcelain" 2>$null
+            
+            # Get list of untracked files
+            $untrackedFiles = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git ls-files --others --exclude-standard" 2>$null
+            
+            $state = @{
+                RepoPath = $RepoPath
+                CurrentCommit = $currentCommit
+                ModifiedFiles = ($gitStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+                UntrackedFiles = ($untrackedFiles -split "`n" | Where-Object { $_.Trim() -ne "" })
+                Timestamp = Get-Date
+                IsRemote = $true
+            }
+            
+            Write-Host "[SUCCESS] Remote git repository state captured" -ForegroundColor Green
+            return $state
+            
+        } catch {
+            Write-Host "[WARNING] Error capturing remote git repository state: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $null
+        }
+    } else {
+        # Handle local repository paths
+        if (-not (Test-Path $RepoPath)) {
+            Write-Host "[WARNING] Repository path does not exist: $RepoPath" -ForegroundColor Yellow
+            return $null
         }
         
-        Write-Host "[INFO] Captured git state: $($state.ModifiedFiles.Count) modified, $($state.UntrackedFiles.Count) untracked files" -ForegroundColor Green
-        return $state
-        
-    } catch {
-        Write-Host "[WARNING] Error capturing git state: $($_.Exception.Message)" -ForegroundColor Yellow
-        return $null
-    } finally {
-        Pop-Location
+        try {
+            Push-Location $RepoPath
+            
+            # Check if this is a git repository
+            $isGitRepo = git rev-parse --is-inside-work-tree 2>$null
+            if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
+                Write-Host "[INFO] Not a git repository or git not available" -ForegroundColor Cyan
+                return $null
+            }
+            
+            # Get current commit hash
+            $currentCommit = git rev-parse HEAD 2>$null
+            
+            # Get list of modified/added/deleted files
+            $gitStatus = git status --porcelain 2>$null
+            
+            # Get list of untracked files
+            $untrackedFiles = git ls-files --others --exclude-standard 2>$null
+            
+            $state = @{
+                RepoPath = $RepoPath
+                CurrentCommit = $currentCommit
+                ModifiedFiles = ($gitStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+                UntrackedFiles = ($untrackedFiles -split "`n" | Where-Object { $_.Trim() -ne "" })
+                Timestamp = Get-Date
+                IsRemote = $false
+            }
+            
+            Write-Host "[INFO] Captured local git state: $($state.ModifiedFiles.Count) modified, $($state.UntrackedFiles.Count) untracked files" -ForegroundColor Green
+            return $state
+            
+        } catch {
+            Write-Host "[WARNING] Error capturing local git state: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $null
+        } finally {
+            Pop-Location
+        }
     }
 }
 
@@ -2572,8 +2876,16 @@ Write-Host "[INFO] Checking for existing containers for user: $USERNAME" -Foregr
 Write-Host ""
 
 try {
+    # Ensure SSH environment is set for remote Docker operations
+    Ensure-DockerSSHEnvironment
+    
     # Get all containers (running and stopped) that contain the username
-    $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+    } else {
+        # For remote, use the context we set up
+        $existingContainers = & docker --context $script:REMOTE_CONTEXT_NAME ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+    }
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARNING] Could not check for existing containers. Consider checking manually in Docker Desktop!" -ForegroundColor Yellow
@@ -2599,7 +2911,11 @@ try {
             Write-Host ""
             
             # Check specifically for running containers
-            $runningContainers = & docker ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                $runningContainers = & docker ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
+            } else {
+                $runningContainers = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
+            }
             $runningList = $runningContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_.Trim() -ne "" }
             
             if ($runningList.Count -gt 0) {
@@ -2636,10 +2952,17 @@ try {
                     Write-Host ""
                     Write-Host "Stopping existing containers for user '$USERNAME'..."
                     
+                    # Ensure SSH environment is set for remote Docker operations
+                    Ensure-DockerSSHEnvironment
+                    
                     foreach ($runningContainer in $runningList) {
                         if ($runningContainer.Trim() -ne "") {
                             Write-Host "  Stopping container: $runningContainer"
-                            & docker stop $runningContainer 2>$null
+                            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                                & docker stop $runningContainer 2>$null
+                            } else {
+                                & docker --context $script:REMOTE_CONTEXT_NAME stop $runningContainer 2>$null
+                            }
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host "    [SUCCESS] Stopped: $runningContainer" -ForegroundColor Green
                             } else {
@@ -2700,7 +3023,14 @@ Write-Host ""
 # Check if the specific container is currently running
 $isContainerRunning = $false
 try {
-    $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    # Ensure SSH environment is set for remote Docker operations
+    Ensure-DockerSSHEnvironment
+    
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    } else {
+        $runningCheck = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    }
     if ($null -eq $runningCheck) {
         $runningCheck = "this_container_does_not_exist" # Default to non-matching string
     }
@@ -2879,37 +3209,56 @@ $buttonStart.Add_Click({
     Write-Host ""
 
     # Resolve docker setup directory based on current model
-    if (-not $script:LOCAL_REPO_PATH -and -not $script:REMOTE_REPO_PATH) {
-        Write-Host "[FATAL ERROR] No path for repository or model found. Please restart the application and select a folder."
-        Exit 1
-    } elseif (Test-Path $script:LOCAL_REPO_PATH) {
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        if (-not $script:LOCAL_REPO_PATH) {
+            Write-Host "[FATAL ERROR] No local repository path found. Please restart the application and select a folder."
+            Exit 1
+        }
         $ScriptDir = "$script:LOCAL_REPO_PATH\docker_setup"
+        $ProjectRoot = $script:LOCAL_REPO_PATH
         Write-Host "[INFO] Using local repository path: $script:LOCAL_REPO_PATH" -ForegroundColor Cyan
-    } elseif (Test-Path $script:REMOTE_REPO_PATH) {
-        $ScriptDir = "$script:REMOTE_REPO_PATH/docker_setup"
-        Write-Host "[INFO] Using remote repository path: $script:REMOTE_REPO_PATH" -ForegroundColor Cyan
+        
+        # Validate that the docker_setup directory exists locally
+        if (-not (Test-Path $ScriptDir)) {
+            Write-Host "[FATAL ERROR] Your repository has no Docker setup directory at '$ScriptDir'"
+            Exit 1
+        }
     } else {
-        Write-Host "[FATAL ERROR] Neither local nor remote repository paths are valid. Please restart the application and select a valid folder."
-        Exit 1
-    }
-    # Validate that the docker_setup directory exists (THIS IS MANDATORY)
-    if (-not (Test-Path $ScriptDir)) {
-        Write-Host "[FATAL ERROR] Your repository has no Docker setup directory at '$ScriptDir'"
-        Exit 1
+        # Remote operation
+        if (-not $script:REMOTE_REPO_PATH) {
+            Write-Host "[FATAL ERROR] No remote repository path found. Please restart the application and select a repository."
+            Exit 1
+        }
+        $ScriptDir = "$script:REMOTE_REPO_PATH/docker_setup"
+        $ProjectRoot = $script:REMOTE_REPO_PATH
+        Write-Host "[INFO] Using remote repository path: $script:REMOTE_REPO_PATH" -ForegroundColor Cyan
+        
+        # For remote, we'll validate paths during Docker build, not here with Test-Path
+        Write-Host "[INFO] Remote docker_setup directory: $ScriptDir" -ForegroundColor Cyan
     }
 
-    # Resolve project root directory (one level above the current script directory)
-    $ProjectRoot = $script:LOCAL_REPO_PATH
+    # ProjectRoot is already set correctly in the if/else block above - don't override it
+    Write-Host "[INFO] Project root directory: $ProjectRoot" -ForegroundColor Cyan
 
     # If SimDesignYaml is a relative path, resolve it relative to the project root
     if (-not [System.IO.Path]::IsPathRooted($SimDesignYaml)) {
         # Normalize path separators to forward slashes for cross-platform compatibility
         $SimDesignYamlNormalized = $SimDesignYaml -replace '\\', '/'
         $TempPath = "$ProjectRoot/$SimDesignYamlNormalized" -replace '/+', '/'
-        # Resolve the path to handle .. components properly
-        $SimDesignYaml = (Resolve-Path $TempPath -ErrorAction SilentlyContinue).Path
-        if (-not $SimDesignYaml) {
-            # If Resolve-Path fails, try manual construction (for the actual inputs directory)
+        
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            # For local operations, resolve the path to handle .. components properly
+            $SimDesignYaml = (Resolve-Path $TempPath -ErrorAction SilentlyContinue).Path
+            if (-not $SimDesignYaml) {
+                # If Resolve-Path fails, try manual construction (for the actual inputs directory)
+                if ($SimDesignYamlNormalized -eq "../inputs/sim_design.yaml") {
+                    $SimDesignYaml = "$ProjectRoot/inputs/sim_design.yaml"
+                } else {
+                    $SimDesignYaml = $TempPath
+                }
+            }
+        } else {
+            # For remote operations, construct the path manually (can't use Resolve-Path on remote paths)
             if ($SimDesignYamlNormalized -eq "../inputs/sim_design.yaml") {
                 $SimDesignYaml = "$ProjectRoot/inputs/sim_design.yaml"
             } else {
@@ -2919,11 +3268,17 @@ $buttonStart.Add_Click({
     }
 
     # Validate that the YAML file exists
-    if (-not (Test-Path $SimDesignYaml)) {
-        Write-Host "[FATAL ERROR] YAML file not found at '$SimDesignYaml'"
-        Write-Host "Original path provided: '..\inputs\sim_design.yaml'"
-        Write-Host "Project root: '$ProjectRoot'"
-        Exit 1
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        if (-not (Test-Path $SimDesignYaml)) {
+            Write-Host "[FATAL ERROR] YAML file not found at '$SimDesignYaml'"
+            Write-Host "Original path provided: '..\inputs\sim_design.yaml'"
+            Write-Host "Project root: '$ProjectRoot'"
+            Exit 1
+        }
+    } else {
+        # For remote operations, we'll validate the YAML file exists during Docker build
+        Write-Host "[INFO] Remote YAML file path: $SimDesignYaml" -ForegroundColor Cyan
+        Write-Host "[INFO] YAML file existence will be validated during Docker build" -ForegroundColor Cyan
     }
 
     Write-Host "[INFO] Using configuration file: $SimDesignYaml" -ForegroundColor Cyan
@@ -2947,11 +3302,17 @@ $buttonStart.Add_Click({
                 $imageCheck = & docker images --format "{{.Repository}}" | Where-Object { $_ -eq $DockerImageName }
                 $imageExists = $null -ne $imageCheck
             } else {
-                # Check on remote host
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-                $imageCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker images --format '{{.Repository}}' | grep -q '^$DockerImageName$' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
-                $imageExists = $imageCheck -match "EXISTS"
+                # Check on remote host using Docker context
+                Ensure-DockerSSHEnvironment
+                Write-Host "[INFO] Checking for Docker image on remote host using context: $script:REMOTE_CONTEXT_NAME" -ForegroundColor Cyan
+                $imageCheck = & docker --context $script:REMOTE_CONTEXT_NAME images --format "{{.Repository}}" 2>$null | Where-Object { $_ -eq $DockerImageName }
+                $imageExists = $null -ne $imageCheck
+                
+                if ($imageExists) {
+                    Write-Host "[INFO] Found existing image '$DockerImageName' on remote host" -ForegroundColor Cyan
+                } else {
+                    Write-Host "[INFO] Image '$DockerImageName' not found on remote host" -ForegroundColor Cyan
+                }
             }
         } catch {
             Write-Host "[WARNING] Could not check for existing Docker image: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -3170,7 +3531,8 @@ $buttonStart.Add_Click({
                         $prereqDockerfileExists = Test-Path $prereqDockerfilePath
                     } else {
                         $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                        $prereqDockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+                        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                        $prereqDockerfileCheck = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                         $prereqDockerfileExists = $prereqDockerfileCheck -match "EXISTS"
                     }
                 } catch {
@@ -3477,10 +3839,12 @@ $buttonStart.Add_Click({
     Write-Host "[INFO] Capturing git state for change detection..." -ForegroundColor Cyan
     
     # Determine which repository path to use for git operations
-    if (Test-Path $script:LOCAL_REPO_PATH) {
+    if ($CONTAINER_LOCATION -eq "LOCAL" -and $script:LOCAL_REPO_PATH) {
         $gitRepoPath = $script:LOCAL_REPO_PATH
-    } elseif (Test-Path $script:REMOTE_REPO_PATH) {
+        Write-Host "[INFO] Using local repository path for git operations: $gitRepoPath" -ForegroundColor Cyan
+    } elseif ($CONTAINER_LOCATION -like "REMOTE@*" -and $script:REMOTE_REPO_PATH) {
         $gitRepoPath = $script:REMOTE_REPO_PATH
+        Write-Host "[INFO] Using remote repository path for git operations: $gitRepoPath" -ForegroundColor Cyan
     } else {
         Write-Host "[WARNING] No valid repository path found for git operations" -ForegroundColor Yellow
         $gitRepoPath = $null
