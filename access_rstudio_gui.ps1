@@ -25,6 +25,20 @@ TODOs:
  - Ensure the script works both locally and on remote hosts
 #>
 
+# Global debug flag - controls visibility of debug messages
+$script:DEBUG_MODE = $false
+
+# Debug write function that respects the global debug flag
+function Write-Debug-Message {
+    param(
+        [string]$Message,
+        [string]$ForegroundColor = "Yellow"
+    )
+    if ($script:DEBUG_MODE) {
+        Write-Host $Message -ForegroundColor $ForegroundColor
+    }
+}
+
 #--------------------------------------#
 #   ADMINISTRATOR PRIVILEGE CHECK       #
 #--------------------------------------#
@@ -661,7 +675,7 @@ Write-Host ""
 # Create a new form for local/remote selection
 $formConnection = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Container Location - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(450,200)
+    Size = New-Object System.Drawing.Size(450,240)
     StartPosition = 'CenterScreen'
     Location = New-Object System.Drawing.Point(400,300)
     FormBorderStyle = 'FixedDialog'
@@ -678,10 +692,20 @@ $labelConnectionInstruction = New-Object System.Windows.Forms.Label -Property @{
 }
 $formConnection.Controls.Add($labelConnectionInstruction)
 
+# Debug checkbox
+$checkBoxDebug = New-Object System.Windows.Forms.CheckBox -Property @{
+    Text = 'Enable Debug Mode (show detailed debug messages)'
+    Location = New-Object System.Drawing.Point(50,80)
+    Size = New-Object System.Drawing.Size(350,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
+    Checked = $false
+}
+$formConnection.Controls.Add($checkBoxDebug)
+
 # Local Container button
 $buttonLocal = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Local Container'
-    Location = New-Object System.Drawing.Point(80,100)
+    Location = New-Object System.Drawing.Point(80,120)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -690,7 +714,7 @@ $formConnection.Controls.Add($buttonLocal)
 # Remote Container button
 $buttonRemote = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Remote Container'
-    Location = New-Object System.Drawing.Point(250,100)
+    Location = New-Object System.Drawing.Point(250,120)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -698,6 +722,8 @@ $formConnection.Controls.Add($buttonRemote)
 
 # Add click handlers for the buttons
 $buttonLocal.Add_Click({
+    $script:DEBUG_MODE = $checkBoxDebug.Checked
+    Write-Host "[INFO] Debug mode: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "================================================"
     Write-Host "  LOCAL CONTAINER SELECTED"
@@ -715,6 +741,8 @@ $buttonLocal.Add_Click({
 #----------------------------------------------------------------#
 
 $buttonRemote.Add_Click({
+    $script:DEBUG_MODE = $checkBoxDebug.Checked
+    Write-Host "[INFO] Debug mode: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "================================================"
     Write-Host "  REMOTE CONTAINER SELECTED"
@@ -2298,15 +2326,15 @@ function Test-AndCreateDirectory {
         $remotePath = $Path
         
         Write-Host "[INFO] Checking remote directory ($PathKey): $remotePath" -ForegroundColor Cyan
-        Write-Host "[DEBUG] SSH command: ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost" -ForegroundColor Yellow
+        Write-Debug-Message "[DEBUG] SSH command: ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost"
         
         $dirCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
-        Write-Host "[DEBUG] Directory check result: $dirCheck" -ForegroundColor Yellow
+        Write-Debug-Message "[DEBUG] Directory check result: $dirCheck"
         
         if ($dirCheck -match "NOT_EXISTS") {
             Write-Host "[WARNING] Remote $PathKey path not found: $remotePath. Creating directory..." -ForegroundColor Yellow
             $createResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "mkdir -p '$remotePath' && echo 'CREATED' || echo 'FAILED'" 2>&1
-            Write-Host "[DEBUG] Create result: $createResult" -ForegroundColor Yellow
+            Write-Debug-Message "[DEBUG] Create result: $createResult"
             
             if ($createResult -match "CREATED") {
                 Write-Host "[SUCCESS] Successfully created remote $PathKey directory: $remotePath" -ForegroundColor Green
@@ -2319,7 +2347,7 @@ function Test-AndCreateDirectory {
         } elseif ($dirCheck -match "EXISTS") {
             # Check if it's actually a directory, not a file
             $isDirCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'DIR' || echo 'FILE'" 2>&1
-            Write-Host "[DEBUG] Directory type check result: $isDirCheck" -ForegroundColor Yellow
+            Write-Debug-Message "[DEBUG] Directory type check result: $isDirCheck"
             
             if ($isDirCheck -match "FILE") {
                 Write-Host "[ERROR] The remote path specified for $PathKey exists but is a file, not a directory: $remotePath" -ForegroundColor Red
@@ -3399,7 +3427,7 @@ $buttonStart.Add_Click({
 
                 # Build the Docker command as a single string for cmd /c execution
                 $dockerCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
-                Write-Host "[DEBUG] Docker command: $dockerCommand"
+                Write-Debug-Message "[DEBUG] Docker command: $dockerCommand"
                 Write-Host ""
 
                 # Execute Docker build with spinner
@@ -3461,7 +3489,7 @@ $buttonStart.Add_Click({
                     Ensure-DockerSSHEnvironment
                     $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                     $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$buildCommand`""
-                    Write-Host "[DEBUG] SSH command: $sshCommand"
+                    Write-Debug-Message "[DEBUG] SSH command: $sshCommand"
                     Write-Host ""
 
                     $buildResult = & cmd /c $sshCommand '2>&1'
@@ -3570,7 +3598,7 @@ $buttonStart.Add_Click({
 
                             # Build the Docker command for prerequisite
                             $prereqCommand = "docker build -f `"$prereqDockerfilePath`" -t $prereqImageName --no-cache `"$prereqDockerContextPath`""
-                            Write-Host "[DEBUG] Prerequisite command: $prereqCommand"
+                            Write-Debug-Message "[DEBUG] Prerequisite command: $prereqCommand"
                             Write-Host ""
 
                             # Execute prerequisite build with spinner
@@ -3633,7 +3661,7 @@ $buttonStart.Add_Click({
                                 Ensure-DockerSSHEnvironment
                                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                                 $prereqSSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$prereqBuildCommand`""
-                                Write-Host "[DEBUG] SSH prerequisite command: $prereqSSHCommand"
+                                Write-Debug-Message "[DEBUG] SSH prerequisite command: $prereqSSHCommand"
 
                                 $prereqBuildResult = & cmd /c $prereqSSHCommand '2>&1'
                                 $prereqBuildSuccess = $LASTEXITCODE -eq 0
@@ -3697,7 +3725,7 @@ $buttonStart.Add_Click({
 
                                     # Build the Docker command for retry
                                     $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
-                                    Write-Host "[DEBUG] Retry command: $retryCommand"
+                                    Write-Debug-Message "[DEBUG] Retry command: $retryCommand"
                                     Write-Host ""
 
                                     # Execute retry build with spinner
@@ -3761,7 +3789,7 @@ $buttonStart.Add_Click({
                                         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                                         $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$retryBuildCommand`""
                                         Write-Host ""
-                                        Write-Host "[DEBUG] SSH retry command: $retrySSHCommand"
+                                        Write-Debug-Message "[DEBUG] SSH retry command: $retrySSHCommand"
 
                                         $retryBuildResult = & cmd /c $retrySSHCommand '2>&1'
                                         $retryBuildSuccess = $LASTEXITCODE -eq 0
