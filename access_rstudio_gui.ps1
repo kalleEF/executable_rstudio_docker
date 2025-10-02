@@ -2864,13 +2864,113 @@ function Show-GitCommitDialog {
                 $isHttpsRepo = $remoteUrl -match "^https://"
                 $isSshRepo = $remoteUrl -match "^git@"
                 
-                # For SSH repos on remote, ensure SSH agent has the key
+                # Configure git authentication on remote host
                 if ($isSshRepo) {
                     Write-Host "[INFO] Remote repository uses SSH authentication" -ForegroundColor Cyan
+                    Write-Host "[INFO] Configuring SSH agent on remote host..." -ForegroundColor Cyan
+                    
+                    # First check if SSH key exists on remote host
+                    $keyExists = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -f ~/.ssh/id_ed25519_$USERNAME && echo 'exists'" 2>$null
+                    
+                    if ($keyExists -ne "exists") {
+                        Write-Host "[WARNING] SSH key ~/.ssh/id_ed25519_$USERNAME not found on remote host" -ForegroundColor Yellow
+                        $StatusLabel.Text = "Status: Push failed - SSH key not found on remote host. Please ensure SSH key is properly mounted."
+                        $StatusLabel.ForeColor = [System.Drawing.Color]::Orange
+                        return $false
+                    }
+                    
+                    # Start SSH agent and add the key on remote host
+                    $setupSSH = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost @"
+cd '$RepoPath' && \
+eval `$(ssh-agent -s) && \
+ssh-add ~/.ssh/id_ed25519_$USERNAME 2>/dev/null && \
+export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' && \
+git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+"@ 2>&1
+                    
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "[SUCCESS] SSH authentication configured on remote host" -ForegroundColor Green
+                    } else {
+                        Write-Host "[WARNING] SSH setup on remote host had issues: $setupSSH" -ForegroundColor Yellow
+                    }
+                    
+                } elseif ($isHttpsRepo) {
+                    Write-Host "[INFO] Remote repository uses HTTPS - converting to SSH for better authentication" -ForegroundColor Yellow
+                    
+                    # Extract owner/repo from HTTPS URL and convert to SSH
+                    if ($remoteUrl -match "https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$") {
+                        $owner = $matches[1]
+                        $repo = $matches[2]
+                        $sshUrl = "git@github.com:$owner/$repo.git"
+                        
+                        Write-Host "[INFO] Converting remote URL from HTTPS to SSH..." -ForegroundColor Cyan
+                        Write-Host "[INFO] Old URL: $remoteUrl" -ForegroundColor Gray
+                        Write-Host "[INFO] New URL: $sshUrl" -ForegroundColor Gray
+                        
+                        # Change the remote URL to SSH on remote host
+                        $convertResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git remote set-url origin '$sshUrl'" 2>&1
+                        
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Host "[SUCCESS] Converted remote URL to SSH successfully" -ForegroundColor Green
+                            
+                            # Now configure SSH authentication since we converted to SSH
+                            $keyExists = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -f ~/.ssh/id_ed25519_$USERNAME && echo 'exists'" 2>$null
+                            
+                            if ($keyExists -ne "exists") {
+                                Write-Host "[WARNING] SSH key ~/.ssh/id_ed25519_$USERNAME not found on remote host" -ForegroundColor Yellow
+                                $StatusLabel.Text = "Status: Push failed - SSH key not found on remote host after HTTPS->SSH conversion."
+                                $StatusLabel.ForeColor = [System.Drawing.Color]::Orange
+                                return $false
+                            }
+                            
+                            # Configure SSH for the newly converted repository
+                            $setupSSH = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost @"
+cd '$RepoPath' && \
+eval `$(ssh-agent -s) && \
+ssh-add ~/.ssh/id_ed25519_$USERNAME 2>/dev/null && \
+export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' && \
+git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+"@ 2>&1
+                            
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "[SUCCESS] SSH authentication configured after conversion" -ForegroundColor Green
+                            } else {
+                                Write-Host "[WARNING] SSH setup failed after conversion: $setupSSH" -ForegroundColor Yellow
+                            }
+                            
+                            # Update our variables to reflect the conversion
+                            $isSshRepo = $true
+                            $isHttpsRepo = $false
+                            
+                        } else {
+                            Write-Host "[ERROR] Failed to convert remote URL to SSH: $convertResult" -ForegroundColor Red
+                            $StatusLabel.Text = "Status: Push failed - Could not convert HTTPS remote to SSH on remote host."
+                            $StatusLabel.ForeColor = [System.Drawing.Color]::Orange
+                            return $false
+                        }
+                    } else {
+                        Write-Host "[WARNING] Could not parse GitHub HTTPS URL for conversion: $remoteUrl" -ForegroundColor Yellow
+                        $StatusLabel.Text = "Status: Push failed - Remote repository uses HTTPS which requires manual credential setup."
+                        $StatusLabel.ForeColor = [System.Drawing.Color]::Orange
+                        return $false
+                    }
                 }
                 
                 # Capture both stdout and stderr from git push on remote
-                $pushOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git push" 2>&1
+                # Use SSH method since we either started with SSH or converted HTTPS to SSH
+                $pushCommand = "cd '$RepoPath' && eval `$(ssh-agent -s) && ssh-add ~/.ssh/id_ed25519_$USERNAME 2>/dev/null && export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' && git push"
+                
+                $pushOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $pushCommand 2>&1
+                $pushExitCode = $LASTEXITCODE
+                
+                # If SSH agent approach failed, try direct SSH key approach
+                if ($pushExitCode -ne 0 -and ($pushOutput -match "ssh-add.*No such file|ssh-agent.*not found")) {
+                    Write-Host "[INFO] SSH agent approach failed, trying direct SSH key method..." -ForegroundColor Yellow
+                    
+                    $directPushCommand = "cd '$RepoPath' && GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' git push"
+                    $pushOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $directPushCommand 2>&1
+                    $pushExitCode = $LASTEXITCODE
+                }
                 $pushExitCode = $LASTEXITCODE
                 
             } else {
@@ -2945,29 +3045,65 @@ function Show-GitCommitDialog {
                 if ($errorMessage -match "git-credential-manager-core was renamed") {
                     $StatusLabel.Text = "Status: Push failed - Git credential manager needs updating. Please update Git for Windows."
                 } elseif ($errorMessage -match "Invalid username or token|Password authentication is not supported") {
-                    $StatusLabel.Text = "Status: Push failed - GitHub token expired/invalid. Please re-authenticate in VS Code or update your Personal Access Token."
+                    if ($isRemote) {
+                        $StatusLabel.Text = "Status: Push failed - Remote host needs GitHub authentication. Consider using SSH instead of HTTPS."
+                    } else {
+                        $StatusLabel.Text = "Status: Push failed - GitHub token expired/invalid. Please re-authenticate in VS Code or update your Personal Access Token."
+                    }
                 } elseif ($errorMessage -match "Authentication failed.*github\.com") {
-                    $StatusLabel.Text = "Status: Push failed - GitHub authentication failed. Please sign in to GitHub in VS Code."
+                    if ($isRemote) {
+                        $StatusLabel.Text = "Status: Push failed - Remote GitHub authentication failed. Check SSH key configuration on remote host."
+                    } else {
+                        $StatusLabel.Text = "Status: Push failed - GitHub authentication failed. Please sign in to GitHub in VS Code."
+                    }
                 } elseif ($errorMessage -match "Permission denied \(publickey\)|Host key verification failed") {
                     if ($isSshRepo) {
-                        $StatusLabel.Text = "Status: Push failed - SSH key not added to GitHub. Please add your public key to GitHub."
+                        if ($isRemote) {
+                            $StatusLabel.Text = "Status: Push failed - SSH key not configured on remote host or not added to GitHub."
+                        } else {
+                            $StatusLabel.Text = "Status: Push failed - SSH key not added to GitHub. Please add your public key to GitHub."
+                        }
                     } else {
                         $StatusLabel.Text = "Status: Push failed - SSH authentication failed."
                     }
+                } elseif ($errorMessage -match "could not read Username.*github\.com|Kein passendes.*Adresse gefunden") {
+                    if ($isRemote) {
+                        $StatusLabel.Text = "Status: HTTPS authentication failed on remote. Repository should be converted to SSH automatically."
+                    } else {
+                        $StatusLabel.Text = "Status: GitHub HTTPS authentication failed. Please authenticate in VS Code or use SSH."
+                    }
                 } elseif ($errorMessage -match "could not read Username|No such file or directory|/dev/tty: No such device") {
                     if ($isHttpsRepo) {
-                        $StatusLabel.Text = "Status: Push failed - Git credentials not configured. Please run 'git push' manually in VS Code or terminal to authenticate."
+                        if ($isRemote) {
+                            $StatusLabel.Text = "Status: Push failed - Remote host git credentials not configured. Consider using SSH key authentication."
+                        } else {
+                            $StatusLabel.Text = "Status: Push failed - Git credentials not configured. Please run 'git push' manually in VS Code or terminal to authenticate."
+                        }
                     } else {
-                        $StatusLabel.Text = "Status: Push failed - SSH key authentication issue. Please check your SSH setup."
+                        if ($isRemote) {
+                            $StatusLabel.Text = "Status: Push failed - SSH key authentication issue on remote host."
+                        } else {
+                            $StatusLabel.Text = "Status: Push failed - SSH key authentication issue. Please check your SSH setup."
+                        }
                     }
+                } elseif ($errorMessage -match "ssh-add.*No such file or directory|ssh-agent.*not found") {
+                    $StatusLabel.Text = "Status: Push failed - SSH agent not available on remote host. Retrying with direct SSH key..."
                 } elseif ($errorMessage -match "Permission denied|Authentication failed") {
-                    $StatusLabel.Text = "Status: Push failed - Authentication failed. Please verify your credentials in VS Code."
+                    if ($isRemote) {
+                        $StatusLabel.Text = "Status: Push failed - Authentication failed on remote host. Check SSH key and GitHub access."
+                    } else {
+                        $StatusLabel.Text = "Status: Push failed - Authentication failed. Please verify your credentials in VS Code."
+                    }
                 } elseif ($errorMessage -match "non-fast-forward|failed to push some refs") {
                     $StatusLabel.Text = "Status: Push failed - Remote has newer commits. Pull first, then retry."
                 } elseif ($errorMessage -match "Connection timed out|Network is unreachable") {
                     $StatusLabel.Text = "Status: Push failed - Network issue. Check internet connection."
                 } else {
-                    $StatusLabel.Text = "Status: Push failed - Run 'git push' manually in VS Code terminal."
+                    if ($isRemote) {
+                        $StatusLabel.Text = "Status: Push failed - SSH to remote host and run 'git push' manually to see detailed error."
+                    } else {
+                        $StatusLabel.Text = "Status: Push failed - Run 'git push' manually in VS Code terminal."
+                    }
                 }
                 
                 $StatusLabel.ForeColor = [System.Drawing.Color]::Orange
