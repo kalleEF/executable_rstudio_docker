@@ -1158,7 +1158,7 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
 
         # Use specific SSH key to avoid authentication failures
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-        $dockerTestResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 $remoteHost "docker --version" 2>&1
+        $dockerTestResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker --version" 2>&1
         
         Write-Host ""
         Write-Host "[SUCCESS] Docker is available on remote host" -ForegroundColor Green
@@ -1754,7 +1754,7 @@ Host docker-$sshHostname
     
     # Test SSH with the exact same parameters Docker will use
     Write-Host "    [INFO] Testing SSH with key: $sshKeyPath" -ForegroundColor Cyan
-    $sshConnectTest = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "echo 'SSH_OK_FOR_DOCKER' && docker --version" 2>&1
+    $sshConnectTest = & ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "echo 'SSH_OK_FOR_DOCKER' && docker --version" 2>&1
     
     if ($LASTEXITCODE -eq 0 -and $sshConnectTest -match "SSH_OK_FOR_DOCKER") {
         Write-Host "    [SUCCESS] SSH connectivity confirmed for Docker context" -ForegroundColor Green
@@ -2297,33 +2297,40 @@ function Test-AndCreateDirectory {
         # Use Unix path format for remote operations (no conversion needed)
         $remotePath = $Path
         
-        Write-Host "[INFO] Checking remote directory: $remotePath" -ForegroundColor Cyan
-        $dirCheck = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -d '$remotePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>$null
+        Write-Host "[INFO] Checking remote directory ($PathKey): $remotePath" -ForegroundColor Cyan
+        Write-Host "[DEBUG] SSH command: ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost" -ForegroundColor Yellow
+        
+        $dirCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+        Write-Host "[DEBUG] Directory check result: $dirCheck" -ForegroundColor Yellow
         
         if ($dirCheck -match "NOT_EXISTS") {
-            Write-Host "Warning: Remote $PathKey path not found: $remotePath. Creating directory..."
-            $createResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "mkdir -p '$remotePath' && echo 'CREATED' || echo 'FAILED'" 2>$null
+            Write-Host "[WARNING] Remote $PathKey path not found: $remotePath. Creating directory..." -ForegroundColor Yellow
+            $createResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "mkdir -p '$remotePath' && echo 'CREATED' || echo 'FAILED'" 2>&1
+            Write-Host "[DEBUG] Create result: $createResult" -ForegroundColor Yellow
             
             if ($createResult -match "CREATED") {
-                Write-Host "Successfully created remote $PathKey directory: $remotePath"
+                Write-Host "[SUCCESS] Successfully created remote $PathKey directory: $remotePath" -ForegroundColor Green
                 return $true
             } else {
-                Write-Host "Error: Failed to create remote $PathKey directory: $remotePath"
+                Write-Host "[ERROR] Failed to create remote $PathKey directory: $remotePath" -ForegroundColor Red
+                Write-Host "[ERROR] Create error details: $createResult" -ForegroundColor Red
                 return $false
             }
         } elseif ($dirCheck -match "EXISTS") {
             # Check if it's actually a directory, not a file
-            $isDirCheck = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -d '$remotePath' && echo 'DIR' || echo 'FILE'" 2>$null
+            $isDirCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'DIR' || echo 'FILE'" 2>&1
+            Write-Host "[DEBUG] Directory type check result: $isDirCheck" -ForegroundColor Yellow
             
             if ($isDirCheck -match "FILE") {
-                Write-Host "Error: The remote path specified for $PathKey exists but is a file, not a directory: $remotePath"
+                Write-Host "[ERROR] The remote path specified for $PathKey exists but is a file, not a directory: $remotePath" -ForegroundColor Red
                 return $false
             } else {
                 Write-Host "[SUCCESS] Remote $PathKey directory exists: $remotePath" -ForegroundColor Green
                 return $true
             }
         } else {
-            Write-Host "Error: Could not check remote $PathKey directory: $remotePath"
+            Write-Host "[ERROR] Could not check remote $PathKey directory: $remotePath" -ForegroundColor Red
+            Write-Host "[ERROR] SSH check error details: $dirCheck" -ForegroundColor Red
             return $false
         }
     } else {
@@ -3450,8 +3457,10 @@ $buttonStart.Add_Click({
                 Start-Spinner -Message ""
 
                 try {
-                    # Execute SSH command directly and show output in real-time
-                    $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$buildCommand`""
+                    # Execute SSH command directly and show output in real-time with proper authentication
+                    Ensure-DockerSSHEnvironment
+                    $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                    $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$buildCommand`""
                     Write-Host "[DEBUG] SSH command: $sshCommand"
                     Write-Host ""
 
@@ -3532,7 +3541,7 @@ $buttonStart.Add_Click({
                     } else {
                         $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
                         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-                        $prereqDockerfileCheck = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+                        $prereqDockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                         $prereqDockerfileExists = $prereqDockerfileCheck -match "EXISTS"
                     }
                 } catch {
@@ -3620,8 +3629,10 @@ $buttonStart.Add_Click({
                             Start-Spinner -Message ""
 
                             try {
-                                # Execute SSH prerequisite command directly and show output in real-time
-                                $prereqSSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$prereqBuildCommand`""
+                                # Execute SSH prerequisite command directly and show output in real-time with proper authentication
+                                Ensure-DockerSSHEnvironment
+                                $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                                $prereqSSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$prereqBuildCommand`""
                                 Write-Host "[DEBUG] SSH prerequisite command: $prereqSSHCommand"
 
                                 $prereqBuildResult = & cmd /c $prereqSSHCommand '2>&1'
@@ -3745,8 +3756,10 @@ $buttonStart.Add_Click({
                                     Start-Spinner -Message ""
 
                                     try {
-                                        # Execute SSH retry command directly and show output in real-time
-                                        $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes $remoteHost `"$retryBuildCommand`""
+                                        # Execute SSH retry command directly and show output in real-time with proper authentication
+                                        Ensure-DockerSSHEnvironment
+                                        $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                                        $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$retryBuildCommand`""
                                         Write-Host ""
                                         Write-Host "[DEBUG] SSH retry command: $retrySSHCommand"
 
@@ -3946,50 +3959,80 @@ $buttonStart.Add_Click({
         # Build rsync-alpine image if it doesn't already exist.
         $script:rsyncImage = "rsync-alpine"
         $rsyncImage = $script:rsyncImage  # Keep local copy for backwards compatibility
-        & docker image inspect $rsyncImage > $null 2>&1
+        
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker image inspect $rsyncImage > $null 2>&1
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME image inspect $rsyncImage > $null 2>&1
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[INFO] Building rsync-alpine image..." -ForegroundColor Cyan
 
-            # Check if Dockerfile.rsync exists
-            $DockerfileRsync = Join-Path $ScriptDir "Dockerfile.rsync"
-            if (Test-Path $DockerfileRsync) {
-                Write-Host "[INFO] Using Dockerfile.rsync..." -ForegroundColor Cyan
-                & docker build -f "$DockerfileRsync" -t $rsyncImage $ScriptDir
-            } else {
-                Write-Host "[WARNING] Dockerfile.rsync not found, creating rsync image inline..." -ForegroundColor Yellow
+            # Use inline Dockerfile approach for reliable cross-platform building
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                Write-Host "[INFO] Creating rsync image inline for local Docker..." -ForegroundColor Cyan
                 $InlineDockerfile = @"
 FROM alpine:latest
 RUN apk add --no-cache rsync
 "@
                 $InlineDockerfile | & docker build -t $rsyncImage -
+            } else {
+                Write-Host "[INFO] Creating rsync image inline for remote Docker..." -ForegroundColor Cyan
+                Ensure-DockerSSHEnvironment
+                $InlineDockerfile = @"
+FROM alpine:latest
+RUN apk add --no-cache rsync
+"@
+                $InlineDockerfile | & docker --context $script:REMOTE_CONTEXT_NAME build -t $rsyncImage -
             }
         } else {
             Write-Host "[INFO] Using existing rsync-alpine image." -ForegroundColor Cyan
         }
 
-        # Ensure local output directories exist
-        if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
-        if (-not (Test-Path $synthpopDir)) { New-Item -ItemType Directory -Path $synthpopDir | Out-Null }
+        # Ensure output directories exist (only needed for local operations since remote is handled by Test-AndCreateDirectory)
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+            if (-not (Test-Path $synthpopDir)) { New-Item -ItemType Directory -Path $synthpopDir | Out-Null }
+        }
 
         # Remove any existing volumes (ignore errors if not removable)
         Write-Host "[INFO] Removing any existing volumes (if possible)..." -ForegroundColor Cyan
-        & docker volume rm $VolumeOutput -f 2>$null
-        & docker volume rm $VolumeSynthpop -f 2>$null
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker volume rm $VolumeOutput -f 2>$null
+            & docker volume rm $VolumeSynthpop -f 2>$null
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $VolumeOutput -f 2>$null
+            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $VolumeSynthpop -f 2>$null
+        }
 
         # Create fresh Docker-managed volumes
-        & docker volume create $VolumeOutput | Out-Null
-        & docker volume create $VolumeSynthpop | Out-Null
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker volume create $VolumeOutput | Out-Null
+            & docker volume create $VolumeSynthpop | Out-Null
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME volume create $VolumeOutput | Out-Null
+            & docker --context $script:REMOTE_CONTEXT_NAME volume create $VolumeSynthpop | Out-Null
+        }
 
         # Fix volume ownership and pre-populate volumes:
         # Docker volumes are created with root ownership by default. We need to fix
         # the ownership before we can populate them as the calling user.
         Write-Host "[INFO] Setting correct ownership for Docker volumes..." -ForegroundColor Cyan
-        & docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
-        & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+            & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+            & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+        }
         Write-Host ""
 
         # Pre-populate volumes:
-        # The output and synthpop volumes are populated from the respective local folders.
+        # The output and synthpop volumes are populated from the respective source folders.
         
         # Use permission-tolerant copy with fallback logic
         if ($CONTAINER_LOCATION -eq "LOCAL") {
@@ -4002,15 +4045,24 @@ RUN apk add --no-cache rsync
             $dockerOutputSource = $outputDir
             $dockerSynthpopSource = $synthpopDir
             $script:REPO_PATH = $script:REMOTE_REPO_PATH
-
         }
 
-        Write-Host "[INFO] Populating output volume from local folder..." -ForegroundColor Cyan
+        Write-Host "[INFO] Populating output volume from source directory..." -ForegroundColor Cyan
         Write-Host ""
-        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
-        Write-Host "[INFO] Populating synthpop volume from local folder..." -ForegroundColor Cyan
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        }
+        Write-Host "[INFO] Populating synthpop volume from source directory..." -ForegroundColor Cyan
         Write-Host ""
-        & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+        }
 
         # Run the main container with volumes mounted.
         Write-Host "[INFO] Running the main container using Docker volumes..." -ForegroundColor Cyan
@@ -4034,7 +4086,7 @@ RUN apk add --no-cache rsync
             # Directory mounts
             "-v", "${VolumeOutput}:/home/rstudio/$script:SELECTED_REPO/outputs",
             "-v", "${VolumeSynthpop}:/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
-            # SSH key and known_hosts for git access (Windows paths)
+            # SSH key and known_hosts for git access - use appropriate paths for execution location
             "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
             "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
             # Working directory
@@ -4046,7 +4098,12 @@ RUN apk add --no-cache rsync
 
         # Execute docker with the arguments array
         Write-Host "[INFO] Starting RStudio Server container with volumes..." -ForegroundColor Cyan
-        & docker $dockerArgs
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker $dockerArgs
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME $dockerArgs
+        }
         Write-Host ""
         Write-Host ""
         
@@ -4059,7 +4116,12 @@ RUN apk add --no-cache rsync
             Start-Sleep -Seconds 3
             
             # Check if container is still running
-            $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            } else {
+                Ensure-DockerSSHEnvironment
+                $containerStatus = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            }
             if ($containerStatus) {
                 Write-Host "[SUCCESS] Container is running: $containerStatus" -ForegroundColor Green
                 Write-Host ""
@@ -4089,7 +4151,12 @@ RUN apk add --no-cache rsync
                 
             } else {
                 Write-Host "[WARNING] Container may have exited. Checking logs..." -ForegroundColor Yellow
-                $containerLogs = & docker logs $CONTAINER_NAME 2>&1
+                if ($CONTAINER_LOCATION -eq "LOCAL") {
+                    $containerLogs = & docker logs $CONTAINER_NAME 2>&1
+                } else {
+                    Ensure-DockerSSHEnvironment
+                    $containerLogs = & docker --context $script:REMOTE_CONTEXT_NAME logs $CONTAINER_NAME 2>&1
+                }
                 Write-Host "[ERROR] Container logs:" -ForegroundColor Red
                 Write-Host $containerLogs
                 
@@ -4201,7 +4268,12 @@ RUN apk add --no-cache rsync
         Write-Host ""
         Write-Host "[INFO] Starting RStudio Server container..." -ForegroundColor Cyan
         Write-Host ""
-        & docker $dockerArgs
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            & docker $dockerArgs
+        } else {
+            Ensure-DockerSSHEnvironment
+            & docker --context $script:REMOTE_CONTEXT_NAME $dockerArgs
+        }
         Write-Host ""
         Write-Host ""
         
@@ -4216,7 +4288,12 @@ RUN apk add --no-cache rsync
             Start-Sleep -Seconds 3
             
             # Check if container is still running
-            $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            } else {
+                Ensure-DockerSSHEnvironment
+                $containerStatus = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+            }
             if ($containerStatus) {
                 Write-Host "[SUCCESS] Container is running: $containerStatus" -ForegroundColor Green
                 Write-Host ""
@@ -4247,7 +4324,12 @@ RUN apk add --no-cache rsync
                 Write-Host ""
                 Write-Host "[WARNING] Container may have exited. Checking logs..." -ForegroundColor Yellow
                 Write-Host ""
-                $containerLogs = & docker logs $CONTAINER_NAME 2>&1
+                if ($CONTAINER_LOCATION -eq "LOCAL") {
+                    $containerLogs = & docker logs $CONTAINER_NAME 2>&1
+                } else {
+                    Ensure-DockerSSHEnvironment
+                    $containerLogs = & docker --context $script:REMOTE_CONTEXT_NAME logs $CONTAINER_NAME 2>&1
+                }
                 Write-Host "[ERROR] Container logs:" -ForegroundColor Red
                 Write-Host $containerLogs
                 
@@ -4275,7 +4357,12 @@ $buttonStop.Add_Click({
     
     # Check if container is actually running before attempting to stop
     Write-Host "[INFO] Checking if container '$CONTAINER_NAME' is running..." -ForegroundColor Cyan
-    $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    } else {
+        Ensure-DockerSSHEnvironment
+        $containerRunning = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+    }
     Write-Host ""
     
     if ($containerRunning -and $containerRunning.Trim() -eq $CONTAINER_NAME) {
@@ -4286,7 +4373,12 @@ $buttonStop.Add_Click({
             # Stop the container gracefully
             Write-Host "[INFO] Attempting graceful shutdown (SIGTERM)..." -ForegroundColor Cyan
             Write-Host ""
-            & docker stop $CONTAINER_NAME 2>&1 | Out-Null
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                & docker stop $CONTAINER_NAME 2>&1 | Out-Null
+            } else {
+                Ensure-DockerSSHEnvironment
+                & docker --context $script:REMOTE_CONTEXT_NAME stop $CONTAINER_NAME 2>&1 | Out-Null
+            }
             
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "[SUCCESS] Container '$CONTAINER_NAME' stopped successfully" -ForegroundColor Green
@@ -4296,7 +4388,12 @@ $buttonStop.Add_Click({
                 Start-Sleep -Seconds 2
                 
                 # Verify the container is actually stopped
-                $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+                if ($CONTAINER_LOCATION -eq "LOCAL") {
+                    $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+                } else {
+                    Ensure-DockerSSHEnvironment
+                    $stillRunning = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+                }
                 if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
                     Write-Host "[SUCCESS] Container confirmed stopped." -ForegroundColor Green
                     Write-Host ""
@@ -4321,14 +4418,26 @@ $buttonStop.Add_Click({
                         
                         # Use ${} to delimit variable name before the colon and add permission flags
                         # Added --no-perms and --chmod=ugo=rwX to prevent permission issues on Windows
-                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
-                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        if ($CONTAINER_LOCATION -eq "LOCAL") {
+                            & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                            & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        } else {
+                            Ensure-DockerSSHEnvironment
+                            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                        }
                         Write-Host ""
 
                         # Clean up all the Docker volumes used for the simulation.
                         Write-Host "[INFO] Cleaning up Docker volumes..." -ForegroundColor Cyan
-                        & docker volume rm $script:VolumeOutput | Out-Null
-                        & docker volume rm $script:VolumeSynthpop | Out-Null
+                        if ($CONTAINER_LOCATION -eq "LOCAL") {
+                            & docker volume rm $script:VolumeOutput | Out-Null
+                            & docker volume rm $script:VolumeSynthpop | Out-Null
+                        } else {
+                            Ensure-DockerSSHEnvironment
+                            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $script:VolumeOutput | Out-Null
+                            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $script:VolumeSynthpop | Out-Null
+                        }
                         Write-Host ""
                     }    
 
