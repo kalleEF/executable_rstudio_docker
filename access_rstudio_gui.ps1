@@ -2657,49 +2657,95 @@ function Invoke-GitChangeDetection {
         return
     }
     
+    # Check if this is a remote repository
+    $isRemote = $CONTAINER_LOCATION -like "REMOTE@*"
+    
     try {
-        Push-Location $RepoPath
-        
-        # Get current status
-        $currentStatus = git status --porcelain 2>$null
-        $currentFiles = ($currentStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
-        
-        # Check if there are any changes
-        if ($currentFiles.Count -eq 0) {
-            Write-Host "[INFO] No git changes detected after container execution" -ForegroundColor Green
-            return
-        }
-        
-        Write-Host "[INFO] Git changes detected! Found $($currentFiles.Count) modified/new files:" -ForegroundColor Yellow
-        foreach ($file in $currentFiles) {
-            Write-Host "  $file" -ForegroundColor Yellow
-        }
-        Write-Host ""
-        
-        # Stage all changes
-        Write-Host "[INFO] Staging all changes..." -ForegroundColor Cyan
-        git add -A 2>$null
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[SUCCESS] Changes staged successfully" -ForegroundColor Green
+        if ($isRemote) {
+            # Handle remote repository
+            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             
-            # Show the commit dialog
-            Show-GitCommitDialog -RepoPath $RepoPath
+            # Get current status on remote
+            $currentStatus = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git status --porcelain" 2>$null
+            $currentFiles = ($currentStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+            
+            # Check if there are any changes
+            if ($currentFiles.Count -eq 0) {
+                Write-Host "[INFO] No git changes detected after container execution" -ForegroundColor Green
+                return
+            }
+            
+            Write-Host "[INFO] Git changes detected on remote! Found $($currentFiles.Count) modified/new files:" -ForegroundColor Yellow
+            foreach ($file in $currentFiles) {
+                Write-Host "  $file" -ForegroundColor Yellow
+            }
+            Write-Host ""
+            
+            # Stage all changes on remote
+            Write-Host "[INFO] Staging all changes on remote..." -ForegroundColor Cyan
+            & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git add -A" 2>$null
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[SUCCESS] Changes staged successfully on remote" -ForegroundColor Green
+                
+                # Show the commit dialog for remote repository
+                Show-GitCommitDialog -RepoPath $RepoPath
+                
+            } else {
+                Write-Host "[ERROR] Failed to stage changes on remote" -ForegroundColor Red
+            }
             
         } else {
-            Write-Host "[ERROR] Failed to stage changes" -ForegroundColor Red
+            # Handle local repository
+            Push-Location $RepoPath
+            
+            # Get current status
+            $currentStatus = git status --porcelain 2>$null
+            $currentFiles = ($currentStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+            
+            # Check if there are any changes
+            if ($currentFiles.Count -eq 0) {
+                Write-Host "[INFO] No git changes detected after container execution" -ForegroundColor Green
+                return
+            }
+            
+            Write-Host "[INFO] Git changes detected! Found $($currentFiles.Count) modified/new files:" -ForegroundColor Yellow
+            foreach ($file in $currentFiles) {
+                Write-Host "  $file" -ForegroundColor Yellow
+            }
+            Write-Host ""
+            
+            # Stage all changes
+            Write-Host "[INFO] Staging all changes..." -ForegroundColor Cyan
+            git add -A 2>$null
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[SUCCESS] Changes staged successfully" -ForegroundColor Green
+                
+                # Show the commit dialog
+                Show-GitCommitDialog -RepoPath $RepoPath
+                
+            } else {
+                Write-Host "[ERROR] Failed to stage changes" -ForegroundColor Red
+            }
         }
         
     } catch {
         Write-Host "[ERROR] Error during git change detection: $($_.Exception.Message)" -ForegroundColor Red
     } finally {
-        Pop-Location
+        if (-not $isRemote) {
+            Pop-Location
+        }
     }
 }
 
 # 6: Helper function to show git commit dialog
 function Show-GitCommitDialog {
     param([string]$RepoPath)
+    
+    # Check if this is a remote repository
+    $isRemote = $CONTAINER_LOCATION -like "REMOTE@*"
     
     # Create the commit dialog form
     $commitForm = New-Object System.Windows.Forms.Form -Property @{
@@ -2714,7 +2760,7 @@ function Show-GitCommitDialog {
     
     # Title label
     $titleLabel = New-Object System.Windows.Forms.Label -Property @{
-        Text = "Git Changes Detected"
+        Text = "Git Changes Detected$(if($isRemote) { ' (Remote)' })"
         Location = New-Object System.Drawing.Point(20, 20)
         Size = New-Object System.Drawing.Size(560, 30)
         Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 12, [System.Drawing.FontStyle]::Bold)
@@ -2724,7 +2770,7 @@ function Show-GitCommitDialog {
     
     # Info label
     $infoLabel = New-Object System.Windows.Forms.Label -Property @{
-        Text = "Changes have been detected and staged. Enter a commit message:"
+        Text = "Changes have been detected and staged$(if($isRemote) { ' on remote host' }). Enter a commit message:"
         Location = New-Object System.Drawing.Point(20, 60)
         Size = New-Object System.Drawing.Size(560, 20)
         Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
@@ -2804,57 +2850,83 @@ function Show-GitCommitDialog {
         param($RepoPath, $StatusLabel, $CommitForm)
         
         try {
-            Push-Location $RepoPath
-            
-            $StatusLabel.Text = "Status: Pushing to remote repository..."
-            $StatusLabel.ForeColor = [System.Drawing.Color]::Blue
-            $CommitForm.Refresh()
-            
-            # First, try to get remote URL to determine if it's HTTPS or SSH
-            $remoteUrl = git remote get-url origin 2>$null
-            $isHttpsRepo = $remoteUrl -match "^https://"
-            $isSshRepo = $remoteUrl -match "^git@"
-            
-            # Configure git authentication based on repository type
-            if ($isSshRepo) {
-                # Use the same user-specific SSH key that the container uses
-                $userSshKeyPath = "${HOME}\.ssh\id_ed25519_${USERNAME}"
+            if ($isRemote) {
+                # Handle remote repository operations
+                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 
-                if (Test-Path $userSshKeyPath) {
-                    Write-Host "[INFO] Using user-specific SSH key: $userSshKeyPath" -ForegroundColor Cyan
-                    # Set git SSH command to use the specific key (same as container)
-                    $env:GIT_SSH_COMMAND = "ssh -i `"$userSshKeyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-                } else {
-                    Write-Host "[WARNING] User SSH key not found at: $userSshKeyPath" -ForegroundColor Yellow
-                    Write-Host "[INFO] Trying default SSH configuration..." -ForegroundColor Cyan
+                $StatusLabel.Text = "Status: Pushing to remote repository..."
+                $StatusLabel.ForeColor = [System.Drawing.Color]::Blue
+                $CommitForm.Refresh()
+                
+                # First, try to get remote URL to determine if it's HTTPS or SSH
+                $remoteUrl = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git remote get-url origin" 2>$null
+                $isHttpsRepo = $remoteUrl -match "^https://"
+                $isSshRepo = $remoteUrl -match "^git@"
+                
+                # For SSH repos on remote, ensure SSH agent has the key
+                if ($isSshRepo) {
+                    Write-Host "[INFO] Remote repository uses SSH authentication" -ForegroundColor Cyan
                 }
-            } elseif ($isHttpsRepo) {
-                # For HTTPS repos, ensure credential helper is configured and update if using old manager
-                $credHelper = git config --get credential.helper 2>$null
-                if (-not $credHelper -or $credHelper -eq "manager-core") {
-                    Write-Host "[INFO] Configuring git credential helper for Windows..." -ForegroundColor Cyan
-                    # Use the newer git-credential-manager (GCM was renamed from manager-core)
-                    git config credential.helper manager 2>$null
+                
+                # Capture both stdout and stderr from git push on remote
+                $pushOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git push" 2>&1
+                $pushExitCode = $LASTEXITCODE
+                
+            } else {
+                # Handle local repository operations
+                Push-Location $RepoPath
+                
+                $StatusLabel.Text = "Status: Pushing to remote repository..."
+                $StatusLabel.ForeColor = [System.Drawing.Color]::Blue
+                $CommitForm.Refresh()
+                
+                # First, try to get remote URL to determine if it's HTTPS or SSH
+                $remoteUrl = git remote get-url origin 2>$null
+                $isHttpsRepo = $remoteUrl -match "^https://"
+                $isSshRepo = $remoteUrl -match "^git@"
+                
+                # Configure git authentication based on repository type
+                if ($isSshRepo) {
+                    # Use the same user-specific SSH key that the container uses
+                    $userSshKeyPath = "${HOME}\.ssh\id_ed25519_${USERNAME}"
+                    
+                    if (Test-Path $userSshKeyPath) {
+                        Write-Host "[INFO] Using user-specific SSH key: $userSshKeyPath" -ForegroundColor Cyan
+                        # Set git SSH command to use the specific key (same as container)
+                        $env:GIT_SSH_COMMAND = "ssh -i `"$userSshKeyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+                    } else {
+                        Write-Host "[WARNING] User SSH key not found at: $userSshKeyPath" -ForegroundColor Yellow
+                        Write-Host "[INFO] Trying default SSH configuration..." -ForegroundColor Cyan
+                    }
+                } elseif ($isHttpsRepo) {
+                    # For HTTPS repos, ensure credential helper is configured and update if using old manager
+                    $credHelper = git config --get credential.helper 2>$null
+                    if (-not $credHelper -or $credHelper -eq "manager-core") {
+                        Write-Host "[INFO] Configuring git credential helper for Windows..." -ForegroundColor Cyan
+                        # Use the newer git-credential-manager (GCM was renamed from manager-core)
+                        git config credential.helper manager 2>$null
+                    }
                 }
-            }
-            
-            # Capture both stdout and stderr from git push
-            # Use env vars to disable interactive prompting for HTTPS repos only
-            if ($isHttpsRepo) {
-                $env:GIT_TERMINAL_PROMPT = "0"
-                $env:GIT_ASKPASS = "echo"
-            }
-            
-            $pushOutput = git push 2>&1
-            $pushExitCode = $LASTEXITCODE
-            
-            # Clean up environment variables
-            if ($isHttpsRepo) {
-                Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
-                Remove-Item Env:GIT_ASKPASS -ErrorAction SilentlyContinue
-            }
-            if ($isSshRepo) {
-                Remove-Item Env:GIT_SSH_COMMAND -ErrorAction SilentlyContinue
+                
+                # Capture both stdout and stderr from git push
+                # Use env vars to disable interactive prompting for HTTPS repos only
+                if ($isHttpsRepo) {
+                    $env:GIT_TERMINAL_PROMPT = "0"
+                    $env:GIT_ASKPASS = "echo"
+                }
+                
+                $pushOutput = git push 2>&1
+                $pushExitCode = $LASTEXITCODE
+                
+                # Clean up environment variables
+                if ($isHttpsRepo) {
+                    Remove-Item Env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+                    Remove-Item Env:GIT_ASKPASS -ErrorAction SilentlyContinue
+                }
+                if ($isSshRepo) {
+                    Remove-Item Env:GIT_SSH_COMMAND -ErrorAction SilentlyContinue
+                }
             }
             
             if ($pushExitCode -eq 0) {
@@ -2907,7 +2979,9 @@ function Show-GitCommitDialog {
             $StatusLabel.ForeColor = [System.Drawing.Color]::Red
             return $false
         } finally {
-            Pop-Location
+            if (-not $isRemote) {
+                Pop-Location
+            }
         }
     }
     
@@ -2929,15 +3003,31 @@ function Show-GitCommitDialog {
         $openVSCodeButton.Visible = $false
         
         try {
-            Push-Location $RepoPath
+            if ($isRemote) {
+                # Handle remote repository commit
+                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                
+                # Commit the changes on remote
+                $statusLabel.Text = "Status: Creating commit on remote..."
+                $commitForm.Refresh()
+                
+                $commitOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git commit -m '$commitMessage'" 2>&1
+                $commitExitCode = $LASTEXITCODE
+                
+            } else {
+                # Handle local repository commit
+                Push-Location $RepoPath
+                
+                # Commit the changes
+                $statusLabel.Text = "Status: Creating commit..."
+                $commitForm.Refresh()
+                
+                $commitOutput = git commit -m $commitMessage 2>&1
+                $commitExitCode = $LASTEXITCODE
+            }
             
-            # Commit the changes
-            $statusLabel.Text = "Status: Creating commit..."
-            $commitForm.Refresh()
-            
-            $commitOutput = git commit -m $commitMessage 2>&1
-            
-            if ($LASTEXITCODE -eq 0) {
+            if ($commitExitCode -eq 0) {
                 $statusLabel.Text = "Status: Commit successful. Pushing..."
                 $statusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
                 $commitForm.Refresh()
@@ -2975,7 +3065,9 @@ function Show-GitCommitDialog {
             $commitButton.Enabled = $true
             $skipButton.Enabled = $true
         } finally {
-            Pop-Location
+            if (-not $isRemote) {
+                Pop-Location
+            }
         }
     })
     
@@ -3001,10 +3093,17 @@ function Show-GitCommitDialog {
             $statusLabel.ForeColor = [System.Drawing.Color]::Blue
             $commitForm.Refresh()
             
-            Start-Process "code" -ArgumentList $RepoPath -ErrorAction Stop
-            
-            $statusLabel.Text = "Status: Repository opened in VS Code. You can push manually there."
-            $statusLabel.ForeColor = [System.Drawing.Color]::Green
+            if ($isRemote) {
+                # For remote repositories, we can't directly open them in VS Code
+                # Instead, inform the user about manual git operations
+                $statusLabel.Text = "Status: Remote repository - please connect via SSH and use 'git push' manually."
+                $statusLabel.ForeColor = [System.Drawing.Color]::Orange
+            } else {
+                Start-Process "code" -ArgumentList $RepoPath -ErrorAction Stop
+                
+                $statusLabel.Text = "Status: Repository opened in VS Code. You can push manually there."
+                $statusLabel.ForeColor = [System.Drawing.Color]::Green
+            }
             
         } catch {
             $statusLabel.Text = "Status: Could not open VS Code. Please open the repository manually."
