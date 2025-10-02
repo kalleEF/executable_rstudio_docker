@@ -1092,6 +1092,94 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                     Write-Host "  [SUCCESS] Passwordless SSH authentication confirmed!" -ForegroundColor Green
                                     Write-Host "  Response: $finalTest"
                                     Write-Host ""
+                                    
+                                    # Now copy the private key and known_hosts files for Docker container mounting
+                                    Write-Host "  [INFO] Copying SSH private key and known_hosts files for Docker mounting..." -ForegroundColor Cyan
+                                    
+                                    # Copy private key file
+                                    $sshPrivateKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+                                    $sshKnownHostsPath = "$HOME\.ssh\known_hosts"
+                                    
+                                    if (Test-Path $sshPrivateKeyPath) {
+                                        # First, ensure the remote .ssh directory exists with correct permissions
+                                        $setupRemoteSSHCommand = "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
+                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $setupRemoteSSHCommand 2>&1 | Out-Null
+                                        
+                                        # Read private key content and encode in base64 to avoid shell escaping issues
+                                        $privateKeyContent = Get-Content $sshPrivateKeyPath -Raw
+                                        $privateKeyBase64 = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($privateKeyContent))
+                                        
+                                        # Remove any existing file/directory that might be in the way
+                                        $cleanupPrivateKeyCommand = "rm -rf ~/.ssh/id_ed25519_${USERNAME}"
+                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $cleanupPrivateKeyCommand 2>&1 | Out-Null
+                                        
+                                        # Copy private key to remote system
+                                        $copyPrivateKeyCommand = "echo '$privateKeyBase64' | base64 -d > ~/.ssh/id_ed25519_${USERNAME} && chmod 600 ~/.ssh/id_ed25519_${USERNAME} && echo PRIVATE_KEY_COPIED"
+                                        $privateKeyCopyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $copyPrivateKeyCommand 2>&1
+                                        
+                                        if ($privateKeyCopyResult -match "PRIVATE_KEY_COPIED") {
+                                            # Verify the private key was actually copied as a file
+                                            $verifyPrivateKeyCommand = "test -f ~/.ssh/id_ed25519_${USERNAME} && echo PRIVATE_KEY_FILE_EXISTS || echo PRIVATE_KEY_FILE_MISSING"
+                                            $privateKeyVerifyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $verifyPrivateKeyCommand 2>&1
+                                            
+                                            if ($privateKeyVerifyResult -match "PRIVATE_KEY_FILE_EXISTS") {
+                                                Write-Host "    [SUCCESS] Private key copied and verified as file on remote system" -ForegroundColor Green
+                                            } else {
+                                                Write-Host "    [ERROR] Private key was not properly copied as file: $privateKeyVerifyResult" -ForegroundColor Red
+                                            }
+                                        } else {
+                                            Write-Host "    [ERROR] Failed to copy private key: $privateKeyCopyResult" -ForegroundColor Red
+                                        }
+                                    } else {
+                                        Write-Host "    [ERROR] Private key not found at: $sshPrivateKeyPath" -ForegroundColor Red
+                                    }
+                                    
+                                    # Copy known_hosts file if it exists
+                                    if (Test-Path $sshKnownHostsPath) {
+                                        $knownHostsContent = Get-Content $sshKnownHostsPath -Raw
+                                        $knownHostsBase64 = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($knownHostsContent))
+                                        
+                                        # Remove any existing file/directory that might be in the way
+                                        $cleanupKnownHostsCommand = "rm -rf ~/.ssh/known_hosts"
+                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $cleanupKnownHostsCommand 2>&1 | Out-Null
+                                        
+                                        # Copy known_hosts to remote system
+                                        $copyKnownHostsCommand = "echo '$knownHostsBase64' | base64 -d > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts && echo KNOWN_HOSTS_COPIED"
+                                        $knownHostsCopyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $copyKnownHostsCommand 2>&1
+                                        
+                                        if ($knownHostsCopyResult -match "KNOWN_HOSTS_COPIED") {
+                                            # Verify the known_hosts was actually copied as a file
+                                            $verifyKnownHostsCommand = "test -f ~/.ssh/known_hosts && echo KNOWN_HOSTS_FILE_EXISTS || echo KNOWN_HOSTS_FILE_MISSING"
+                                            $knownHostsVerifyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $verifyKnownHostsCommand 2>&1
+                                            
+                                            if ($knownHostsVerifyResult -match "KNOWN_HOSTS_FILE_EXISTS") {
+                                                Write-Host "    [SUCCESS] known_hosts file copied and verified as file on remote system" -ForegroundColor Green
+                                            } else {
+                                                Write-Host "    [ERROR] known_hosts was not properly copied as file: $knownHostsVerifyResult" -ForegroundColor Red
+                                            }
+                                        } else {
+                                            Write-Host "    [ERROR] Failed to copy known_hosts: $knownHostsCopyResult" -ForegroundColor Red
+                                        }
+                                    } else {
+                                        Write-Host "    [INFO] known_hosts file not found, creating empty one on remote" -ForegroundColor Cyan
+                                        # Remove any existing directory and create empty file
+                                        $createKnownHostsCommand = "rm -rf ~/.ssh/known_hosts && touch ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts"
+                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $createKnownHostsCommand 2>&1 | Out-Null
+                                        
+                                        # Verify it was created as a file
+                                        $verifyKnownHostsCommand = "test -f ~/.ssh/known_hosts && echo KNOWN_HOSTS_FILE_EXISTS || echo KNOWN_HOSTS_FILE_MISSING"
+                                        $knownHostsVerifyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $verifyKnownHostsCommand 2>&1
+                                        
+                                        if ($knownHostsVerifyResult -match "KNOWN_HOSTS_FILE_EXISTS") {
+                                            Write-Host "    [SUCCESS] Empty known_hosts file created on remote system" -ForegroundColor Green
+                                        } else {
+                                            Write-Host "    [ERROR] Failed to create known_hosts file: $knownHostsVerifyResult" -ForegroundColor Red
+                                        }
+                                    }
+                                    
+                                    Write-Host "  [INFO] SSH files setup complete for Docker container mounting" -ForegroundColor Cyan
+                                    Write-Host ""
+                                    
                                 } else {
                                     Write-Host ""
                                     Write-Host "  [INFO] Passwordless test not yet working, but key was copied" -ForegroundColor Cyan
@@ -2228,8 +2316,8 @@ Host docker-$sshHostname
 #  HELPER FUNCTIONS:  #
 #---------------------#
 
-# 0: Helper function to ensure SSH environment is set for remote Docker operations
-function Ensure-DockerSSHEnvironment {
+# 0: Helper function to set up SSH environment for remote Docker operations
+function Set-DockerSSHEnvironment {
     if ($CONTAINER_LOCATION -like "REMOTE@*" -and (-not $env:DOCKER_SSH_OPTS -or [string]::IsNullOrEmpty($env:DOCKER_SSH_OPTS))) {
         if ($script:sshKeyPath) {
             $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
@@ -2243,6 +2331,51 @@ function Ensure-DockerSSHEnvironment {
     }
 }
 
+# 0.5: Helper function to verify SSH key files exist on remote system for Docker mounting
+function Test-RemoteSSHKeyFiles {
+    param(
+        [string]$RemoteHost,
+        [string]$Username
+    )
+    
+    $remoteSSHKeyPath = "/home/php-workstation/.ssh/id_ed25519_${Username}"
+    $remoteKnownHostsPath = "/home/php-workstation/.ssh/known_hosts"
+    $localSSHKeyPath = "$HOME\.ssh\id_ed25519_$Username"
+    
+    $results = @{
+        PrivateKeyExists = $false
+        KnownHostsExists = $false
+        ErrorDetails = @()
+    }
+    
+    try {
+        # Check if private key exists on remote
+        $checkPrivateKeyCommand = "test -f '$remoteSSHKeyPath' && echo PRIVATE_KEY_EXISTS || echo PRIVATE_KEY_MISSING"
+        $privateKeyCheckResult = & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkPrivateKeyCommand 2>&1
+        
+        if ($privateKeyCheckResult -match "PRIVATE_KEY_EXISTS") {
+            $results.PrivateKeyExists = $true
+        } else {
+            $results.ErrorDetails += "Private key not found at: $remoteSSHKeyPath (Result: $privateKeyCheckResult)"
+        }
+        
+        # Check if known_hosts exists on remote
+        $checkKnownHostsCommand = "test -f '$remoteKnownHostsPath' && echo KNOWN_HOSTS_EXISTS || echo KNOWN_HOSTS_MISSING"
+        $knownHostsCheckResult = & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkKnownHostsCommand 2>&1
+        
+        if ($knownHostsCheckResult -match "KNOWN_HOSTS_EXISTS") {
+            $results.KnownHostsExists = $true
+        } else {
+            $results.ErrorDetails += "Known_hosts file not found at: $remoteKnownHostsPath (Result: $knownHostsCheckResult)"
+        }
+        
+    } catch {
+        $results.ErrorDetails += "SSH connection failed: $($_.Exception.Message)"
+    }
+    
+    return $results
+}
+
 # 1: Helper function to extract and construct potential paths from the YAML file
 function Get-YamlPathValue {
     param (
@@ -2254,7 +2387,7 @@ function Get-YamlPathValue {
     # Handle remote vs local YAML file reading
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to read the YAML file
-        Ensure-DockerSSHEnvironment
+        Set-DockerSSHEnvironment
         $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
@@ -2318,7 +2451,7 @@ function Test-AndCreateDirectory {
 
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to check and create directories
-        Ensure-DockerSSHEnvironment
+        Set-DockerSSHEnvironment
         $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
@@ -2422,7 +2555,7 @@ function Get-GitRepositoryState {
         }
         
         try {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             
@@ -2912,7 +3045,7 @@ Write-Host ""
 
 try {
     # Ensure SSH environment is set for remote Docker operations
-    Ensure-DockerSSHEnvironment
+    Set-DockerSSHEnvironment
     
     # Get all containers (running and stopped) that contain the username
     if ($CONTAINER_LOCATION -eq "LOCAL") {
@@ -2988,7 +3121,7 @@ try {
                     Write-Host "Stopping existing containers for user '$USERNAME'..."
                     
                     # Ensure SSH environment is set for remote Docker operations
-                    Ensure-DockerSSHEnvironment
+                    Set-DockerSSHEnvironment
                     
                     foreach ($runningContainer in $runningList) {
                         if ($runningContainer.Trim() -ne "") {
@@ -3059,7 +3192,7 @@ Write-Host ""
 $isContainerRunning = $false
 try {
     # Ensure SSH environment is set for remote Docker operations
-    Ensure-DockerSSHEnvironment
+    Set-DockerSSHEnvironment
     
     if ($CONTAINER_LOCATION -eq "LOCAL") {
         $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
@@ -3338,7 +3471,7 @@ $buttonStart.Add_Click({
                 $imageExists = $null -ne $imageCheck
             } else {
                 # Check on remote host using Docker context
-                Ensure-DockerSSHEnvironment
+                Set-DockerSSHEnvironment
                 Write-Host "[INFO] Checking for Docker image on remote host using context: $script:REMOTE_CONTEXT_NAME" -ForegroundColor Cyan
                 $imageCheck = & docker --context $script:REMOTE_CONTEXT_NAME images --format "{{.Repository}}" 2>$null | Where-Object { $_ -eq $DockerImageName }
                 $imageExists = $null -ne $imageCheck
@@ -3486,7 +3619,7 @@ $buttonStart.Add_Click({
 
                 try {
                     # Execute SSH command directly and show output in real-time with proper authentication
-                    Ensure-DockerSSHEnvironment
+                    Set-DockerSSHEnvironment
                     $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                     $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$buildCommand`""
                     Write-Debug-Message "[DEBUG] SSH command: $sshCommand"
@@ -3658,7 +3791,7 @@ $buttonStart.Add_Click({
 
                             try {
                                 # Execute SSH prerequisite command directly and show output in real-time with proper authentication
-                                Ensure-DockerSSHEnvironment
+                                Set-DockerSSHEnvironment
                                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                                 $prereqSSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$prereqBuildCommand`""
                                 Write-Debug-Message "[DEBUG] SSH prerequisite command: $prereqSSHCommand"
@@ -3785,7 +3918,7 @@ $buttonStart.Add_Click({
 
                                     try {
                                         # Execute SSH retry command directly and show output in real-time with proper authentication
-                                        Ensure-DockerSSHEnvironment
+                                        Set-DockerSSHEnvironment
                                         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                                         $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$retryBuildCommand`""
                                         Write-Host ""
@@ -3970,6 +4103,35 @@ $buttonStart.Add_Click({
     #   Run the actual Docker container   #
     #-------------------------------------#
     
+    # For remote operations, verify SSH key files exist before proceeding
+    if ($CONTAINER_LOCATION -ne "LOCAL") {
+        Write-Host "[INFO] Verifying SSH key files exist on remote system for Docker mounting..." -ForegroundColor Cyan
+        
+        $sshKeyVerification = Test-RemoteSSHKeyFiles -RemoteHost $remoteHost -Username $USERNAME
+        
+        if ($sshKeyVerification.PrivateKeyExists -and $sshKeyVerification.KnownHostsExists) {
+            Write-Host "  [SUCCESS] All SSH files verified for Docker container mounting" -ForegroundColor Green
+        } else {
+            Write-Host "  [ERROR] SSH key files are not properly set up on the remote system!" -ForegroundColor Red
+            
+            foreach ($errorDetail in $sshKeyVerification.ErrorDetails) {
+                Write-Host "    [ERROR] $errorDetail" -ForegroundColor Red
+            }
+            
+            Write-Host ""
+            Write-Host "[FATAL ERROR] Cannot proceed with Docker container creation!" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "To fix this issue:" -ForegroundColor Yellow
+            Write-Host "1. Re-run this script and complete the SSH authentication step" -ForegroundColor Yellow
+            Write-Host "2. Ensure the private key copying step completed successfully" -ForegroundColor Yellow
+            Write-Host "3. Check that the remote system has sufficient disk space" -ForegroundColor Yellow
+            Write-Host "4. Verify the remote .ssh directory has correct permissions (700)" -ForegroundColor Yellow
+            Write-Host ""
+            Exit 1
+        }
+        Write-Host ""
+    }
+    
     if ($useVolumes) {
         Write-Host "[INFO] Using Docker volumes for outputs and synthpop..." -ForegroundColor Cyan
         
@@ -3991,7 +4153,7 @@ $buttonStart.Add_Click({
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             & docker image inspect $rsyncImage > $null 2>&1
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME image inspect $rsyncImage > $null 2>&1
         }
         if ($LASTEXITCODE -ne 0) {
@@ -4007,7 +4169,7 @@ RUN apk add --no-cache rsync
                 $InlineDockerfile | & docker build -t $rsyncImage -
             } else {
                 Write-Host "[INFO] Creating rsync image inline for remote Docker..." -ForegroundColor Cyan
-                Ensure-DockerSSHEnvironment
+                Set-DockerSSHEnvironment
                 $InlineDockerfile = @"
 FROM alpine:latest
 RUN apk add --no-cache rsync
@@ -4030,7 +4192,7 @@ RUN apk add --no-cache rsync
             & docker volume rm $VolumeOutput -f 2>$null
             & docker volume rm $VolumeSynthpop -f 2>$null
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME volume rm $VolumeOutput -f 2>$null
             & docker --context $script:REMOTE_CONTEXT_NAME volume rm $VolumeSynthpop -f 2>$null
         }
@@ -4040,7 +4202,7 @@ RUN apk add --no-cache rsync
             & docker volume create $VolumeOutput | Out-Null
             & docker volume create $VolumeSynthpop | Out-Null
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME volume create $VolumeOutput | Out-Null
             & docker --context $script:REMOTE_CONTEXT_NAME volume create $VolumeSynthpop | Out-Null
         }
@@ -4053,7 +4215,7 @@ RUN apk add --no-cache rsync
             & docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
             & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
             & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
         }
@@ -4080,7 +4242,7 @@ RUN apk add --no-cache rsync
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         }
         Write-Host "[INFO] Populating synthpop volume from source directory..." -ForegroundColor Cyan
@@ -4088,7 +4250,7 @@ RUN apk add --no-cache rsync
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         }
 
@@ -4115,8 +4277,8 @@ RUN apk add --no-cache rsync
             "-v", "${VolumeOutput}:/home/rstudio/$script:SELECTED_REPO/outputs",
             "-v", "${VolumeSynthpop}:/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
             # SSH key and known_hosts for git access - use appropriate paths for execution location
-            "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
-            "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
+            "--mount", "type=bind,source=${sshKeyPath},target=/keys/id_ed25519_${USERNAME},readonly",
+            "--mount", "type=bind,source=${knownHostsPath},target=/etc/ssh/ssh_known_hosts,readonly",
             # Working directory
             "--workdir", "/home/rstudio/$script:SELECTED_REPO"
         )
@@ -4129,7 +4291,7 @@ RUN apk add --no-cache rsync
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             & docker $dockerArgs
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME $dockerArgs
         }
         Write-Host ""
@@ -4147,7 +4309,7 @@ RUN apk add --no-cache rsync
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             } else {
-                Ensure-DockerSSHEnvironment
+                Set-DockerSSHEnvironment
                 $containerStatus = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             }
             if ($containerStatus) {
@@ -4182,7 +4344,7 @@ RUN apk add --no-cache rsync
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
                     $containerLogs = & docker logs $CONTAINER_NAME 2>&1
                 } else {
-                    Ensure-DockerSSHEnvironment
+                    Set-DockerSSHEnvironment
                     $containerLogs = & docker --context $script:REMOTE_CONTEXT_NAME logs $CONTAINER_NAME 2>&1
                 }
                 Write-Host "[ERROR] Container logs:" -ForegroundColor Red
@@ -4239,8 +4401,8 @@ RUN apk add --no-cache rsync
                 "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SELECTED_REPO/outputs",
                 "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
                 # SSH key and known_hosts for git access (Windows paths)
-                "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
-                "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
+                "--mount", "type=bind,source=${sshKeyPath},target=/keys/id_ed25519_${USERNAME},readonly",
+                "--mount", "type=bind,source=${knownHostsPath},target=/etc/ssh/ssh_known_hosts,readonly",
                 # Working directory
                 "--workdir", "/home/rstudio/$script:SELECTED_REPO"
             )
@@ -4282,8 +4444,8 @@ RUN apk add --no-cache rsync
                 "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SELECTED_REPO/outputs",
                 "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
                 # SSH key and known_hosts for git access (Linux paths)
-                "-v", "${sshKeyPath}:/keys/id_ed25519_${USERNAME}:ro",
-                "-v", "${knownHostsPath}:/etc/ssh/ssh_known_hosts:ro",
+                "--mount", "type=bind,source=${sshKeyPath},target=/keys/id_ed25519_${USERNAME},readonly",
+                "--mount", "type=bind,source=${knownHostsPath},target=/etc/ssh/ssh_known_hosts,readonly",
                 # Working directory
                 "--workdir", "/home/rstudio/$script:SELECTED_REPO"
             )
@@ -4299,7 +4461,7 @@ RUN apk add --no-cache rsync
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             & docker $dockerArgs
         } else {
-            Ensure-DockerSSHEnvironment
+            Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME $dockerArgs
         }
         Write-Host ""
@@ -4319,7 +4481,7 @@ RUN apk add --no-cache rsync
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             } else {
-                Ensure-DockerSSHEnvironment
+                Set-DockerSSHEnvironment
                 $containerStatus = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             }
             if ($containerStatus) {
@@ -4355,7 +4517,7 @@ RUN apk add --no-cache rsync
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
                     $containerLogs = & docker logs $CONTAINER_NAME 2>&1
                 } else {
-                    Ensure-DockerSSHEnvironment
+                    Set-DockerSSHEnvironment
                     $containerLogs = & docker --context $script:REMOTE_CONTEXT_NAME logs $CONTAINER_NAME 2>&1
                 }
                 Write-Host "[ERROR] Container logs:" -ForegroundColor Red
@@ -4388,7 +4550,7 @@ $buttonStop.Add_Click({
     if ($CONTAINER_LOCATION -eq "LOCAL") {
         $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     } else {
-        Ensure-DockerSSHEnvironment
+        Set-DockerSSHEnvironment
         $containerRunning = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     }
     Write-Host ""
@@ -4404,7 +4566,7 @@ $buttonStop.Add_Click({
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 & docker stop $CONTAINER_NAME 2>&1 | Out-Null
             } else {
-                Ensure-DockerSSHEnvironment
+                Set-DockerSSHEnvironment
                 & docker --context $script:REMOTE_CONTEXT_NAME stop $CONTAINER_NAME 2>&1 | Out-Null
             }
             
@@ -4419,7 +4581,7 @@ $buttonStop.Add_Click({
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
                     $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 } else {
-                    Ensure-DockerSSHEnvironment
+                    Set-DockerSSHEnvironment
                     $stillRunning = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 }
                 if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
@@ -4450,7 +4612,7 @@ $buttonStop.Add_Click({
                             & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                             & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                         } else {
-                            Ensure-DockerSSHEnvironment
+                            Set-DockerSSHEnvironment
                             & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                             & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                         }
@@ -4462,7 +4624,7 @@ $buttonStop.Add_Click({
                             & docker volume rm $script:VolumeOutput | Out-Null
                             & docker volume rm $script:VolumeSynthpop | Out-Null
                         } else {
-                            Ensure-DockerSSHEnvironment
+                            Set-DockerSSHEnvironment
                             & docker --context $script:REMOTE_CONTEXT_NAME volume rm $script:VolumeOutput | Out-Null
                             & docker --context $script:REMOTE_CONTEXT_NAME volume rm $script:VolumeSynthpop | Out-Null
                         }
