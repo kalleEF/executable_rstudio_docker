@@ -771,7 +771,21 @@ $buttonRemote.Add_Click({
         
         # Use specific SSH key to avoid "Too many authentication failures"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-        $sshTestResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
+        
+        # Use PowerShell job with timeout for SSH connection test
+        $sshTestJob = Start-Job -ScriptBlock {
+            param($sshKeyPath, $remoteHost)
+            & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost "echo 'SSH connection successful'" 2>&1
+        } -ArgumentList $sshKeyPath, $remoteHost
+        
+        if (Wait-Job $sshTestJob -Timeout 15) {
+            $sshTestResult = Receive-Job $sshTestJob
+            Remove-Job $sshTestJob
+        } else {
+            Remove-Job $sshTestJob -Force
+            $sshTestResult = "SSH connection test timed out after 15 seconds"
+            $LASTEXITCODE = 1
+        }
         
         $SSHEXITCODE = $LASTEXITCODE
 
@@ -1274,7 +1288,21 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
 
         # Use specific SSH key to avoid authentication failures
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-        $dockerTestResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker --version" 2>&1
+        
+        # Use PowerShell job with timeout for Docker version check
+        $dockerTestJob = Start-Job -ScriptBlock {
+            param($sshKeyPath, $remoteHost)
+            & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker --version" 2>&1
+        } -ArgumentList $sshKeyPath, $remoteHost
+        
+        if (Wait-Job $dockerTestJob -Timeout 15) {
+            $dockerTestResult = Receive-Job $dockerTestJob
+            Remove-Job $dockerTestJob
+        } else {
+            Remove-Job $dockerTestJob -Force
+            $dockerTestResult = "Docker version check timed out after 15 seconds"
+            $LASTEXITCODE = 1
+        }
         
         Write-Host ""
         Write-Host "[SUCCESS] Docker is available on remote host" -ForegroundColor Green
@@ -1379,9 +1407,34 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         Write-Host ""
         Write-Host "    Executing: ssh with key $sshKeyPath to $remoteHost '$scanCommand'"
         Write-Host ""
-        $availableFolders = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $scanCommand 2>&1
         
-        if ($LASTEXITCODE -ne 0) {
+        # Use job with timeout for repository scanning to prevent hanging
+        $scanJob = Start-Job -ScriptBlock {
+            param($sshKeyPath, $remoteHost, $scanCommand)
+            $output = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $scanCommand 2>&1
+            @{
+                Output = $output
+                ExitCode = $LASTEXITCODE
+            }
+        } -ArgumentList $sshKeyPath, $remoteHost, $scanCommand
+        
+        $scanResult = Wait-Job $scanJob -Timeout 20
+        
+        if ($scanResult) {
+            $scanData = Receive-Job $scanJob
+            $availableFolders = $scanData.Output
+            $scanExitCode = $scanData.ExitCode
+            Remove-Job $scanJob
+        } else {
+            Write-Host "    [ERROR] Repository scan timed out" -ForegroundColor Red
+            Stop-Job $scanJob -ErrorAction SilentlyContinue
+            Remove-Job $scanJob -ErrorAction SilentlyContinue
+            Write-Host ""
+            [System.Windows.Forms.MessageBox]::Show("Repository scan timed out after 20 seconds.`n`nThis may indicate network connectivity issues or the remote directory scan is taking too long.", "Scan Timeout", "OK", "Error")
+            exit 1
+        }
+        
+        if ($scanExitCode -ne 0) {
             Write-Host ""
             Write-Host "    [ERROR] Could not scan remote directory" -ForegroundColor Red
             Write-Host "    Command output: $availableFolders"
@@ -1529,16 +1582,39 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
         
         $gitCheckCommand = "test -d '$remoteRepoPath/$($script:SELECTED_REPO)/.git' && echo 'Git repository found' || echo 'No Git repository'"
-        $gitCheckResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $gitCheckCommand 2>&1
         
-        if ($gitCheckResult -match "Git repository found") {
+        # Use job with timeout for git check to prevent hanging
+        Write-Host "    [INFO] Checking for .git directory in selected repository..." -ForegroundColor Cyan
+        $gitCheckJob = Start-Job -ScriptBlock {
+            param($sshKeyPath, $remoteHost, $gitCheckCommand)
+            & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $gitCheckCommand 2>&1
+        } -ArgumentList $sshKeyPath, $remoteHost, $gitCheckCommand
+        
+        $gitCheckResult = Wait-Job $gitCheckJob -Timeout 15
+        
+        if ($gitCheckResult) {
+            $gitCheckOutput = Receive-Job $gitCheckJob
+            Remove-Job $gitCheckJob
+        } else {
+            Write-Host "    [WARNING] Git repository check timed out" -ForegroundColor Yellow
+            Stop-Job $gitCheckJob -ErrorAction SilentlyContinue
+            Remove-Job $gitCheckJob -ErrorAction SilentlyContinue
+            $gitCheckOutput = "Timeout occurred"
+        }
+        
+        if ($gitCheckOutput -match "Git repository found") {
             Write-Host ""
             Write-Host "    [SUCCESS] Git repository found in selected folder" -ForegroundColor Green
             Write-Host ""
         } else {
             Write-Host ""
-            Write-Host "    [WARNING] No .git directory found in selected folder" -ForegroundColor Yellow
-            Write-Host "    This folder may not be a Git repository"
+            if ($gitCheckOutput -match "Timeout occurred") {
+                Write-Host "    [WARNING] Could not verify git repository due to timeout" -ForegroundColor Yellow
+                Write-Host "    The repository verification timed out - continuing anyway"
+            } else {
+                Write-Host "    [WARNING] No .git directory found in selected folder" -ForegroundColor Yellow
+                Write-Host "    This folder may not be a Git repository"
+            }
             Write-Host ""
         }
         Write-Host ""
@@ -1600,8 +1676,27 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             Write-Host ""
             Write-Host "    [INFO] Checking remote Docker engine status..." -ForegroundColor Cyan
             Write-Host ""
-            & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
+            
+            # Use job with timeout for remote docker info to prevent hanging
+            $remoteDockerJob = Start-Job -ScriptBlock {
+                param($sshKeyPath, $remoteHost)
+                & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
+                $LASTEXITCODE
+            } -ArgumentList $sshKeyPath, $remoteHost
+            
+            $remoteDockerResult = Wait-Job $remoteDockerJob -Timeout 15
+            
+            if ($remoteDockerResult) {
+                $remoteExitCode = Receive-Job $remoteDockerJob
+                Remove-Job $remoteDockerJob
+            } else {
+                Write-Host "    [WARNING] Remote Docker info command timed out" -ForegroundColor Yellow
+                Stop-Job $remoteDockerJob -ErrorAction SilentlyContinue
+                Remove-Job $remoteDockerJob -ErrorAction SilentlyContinue
+                $remoteExitCode = 1  # Treat timeout as failure
+            }
+            
+            if ($remoteExitCode -ne 0) {
                 Write-Host ""
                 Write-Host "    [WARNING] Docker engine is not running on remote host" -ForegroundColor Yellow
                 Write-Host "    Attempting to start Docker service on Ubuntu 24.04..."
@@ -1697,12 +1792,29 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         $attempt++
                         Write-Host "    Checking remote Docker daemon status... ($attempt/$maxAttempts)" -NoNewline
                         
-                        & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-Host " [SUCCESS]" -ForegroundColor Green
-                            break
+                        # Use job with timeout for remote docker info check
+                        $remoteCheckJob = Start-Job -ScriptBlock {
+                            param($sshKeyPath, $remoteHost)
+                            & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
+                            $LASTEXITCODE
+                        } -ArgumentList $sshKeyPath, $remoteHost
+                        
+                        $remoteCheckResult = Wait-Job $remoteCheckJob -Timeout 8
+                        
+                        if ($remoteCheckResult) {
+                            $remoteCheckExitCode = Receive-Job $remoteCheckJob
+                            Remove-Job $remoteCheckJob
+                            
+                            if ($remoteCheckExitCode -eq 0) {
+                                Write-Host " [SUCCESS]" -ForegroundColor Green
+                                break
+                            } else {
+                                Write-Host ""
+                            }
                         } else {
-                            Write-Host ""
+                            Write-Host " [TIMEOUT]"
+                            Stop-Job $remoteCheckJob -ErrorAction SilentlyContinue
+                            Remove-Job $remoteCheckJob -ErrorAction SilentlyContinue
                         }
                         
                         # Show different messages at different intervals
@@ -1718,9 +1830,26 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
                         
                     } while ($attempt -lt $maxAttempts)
                     
-                    # Final check
-                    & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
-                    if ($LASTEXITCODE -eq 0) {
+                    # Final check with timeout
+                    $remoteFinalJob = Start-Job -ScriptBlock {
+                        param($sshKeyPath, $remoteHost)
+                        & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "docker info" 2>&1 | Out-Null
+                        $LASTEXITCODE
+                    } -ArgumentList $sshKeyPath, $remoteHost
+                    
+                    $remoteFinalResult = Wait-Job $remoteFinalJob -Timeout 8
+                    
+                    if ($remoteFinalResult) {
+                        $remoteFinalExitCode = Receive-Job $remoteFinalJob
+                        Remove-Job $remoteFinalJob
+                    } else {
+                        Write-Host "    [WARNING] Final remote Docker check timed out" -ForegroundColor Yellow
+                        Stop-Job $remoteFinalJob -ErrorAction SilentlyContinue
+                        Remove-Job $remoteFinalJob -ErrorAction SilentlyContinue
+                        $remoteFinalExitCode = 1
+                    }
+                    
+                    if ($remoteFinalExitCode -eq 0) {
                         Write-Host ""
                         Write-Host "    [SUCCESS] Remote Docker engine started successfully!" -ForegroundColor Green
                         Write-Host "    Startup time: $attempt seconds"
@@ -1870,7 +1999,21 @@ Host docker-$sshHostname
     
     # Test SSH with the exact same parameters Docker will use
     Write-Host "    [INFO] Testing SSH with key: $sshKeyPath" -ForegroundColor Cyan
-    $sshConnectTest = & ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "echo 'SSH_OK_FOR_DOCKER' && docker --version" 2>&1
+    
+    # Use PowerShell job with timeout for SSH and Docker test
+    $sshConnectTestJob = Start-Job -ScriptBlock {
+        param($sshKeyPath, $remoteHost)
+        & ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "echo 'SSH_OK_FOR_DOCKER' && docker --version" 2>&1
+    } -ArgumentList $sshKeyPath, $remoteHost
+    
+    if (Wait-Job $sshConnectTestJob -Timeout 20) {
+        $sshConnectTest = Receive-Job $sshConnectTestJob
+        Remove-Job $sshConnectTestJob
+    } else {
+        Remove-Job $sshConnectTestJob -Force
+        $sshConnectTest = "SSH and Docker connection test timed out after 20 seconds"
+        $LASTEXITCODE = 1
+    }
     
     if ($LASTEXITCODE -eq 0 -and $sshConnectTest -match "SSH_OK_FOR_DOCKER") {
         Write-Host "    [SUCCESS] SSH connectivity confirmed for Docker context" -ForegroundColor Green
@@ -2130,8 +2273,41 @@ Host docker-$sshHostname
             
             # Ensure Docker engine is running
             Write-Host "    [INFO] Checking Docker engine status..." -ForegroundColor Cyan
-            & docker info 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
+            
+            # First try a quick version check which is less likely to hang
+            try {
+                $quickCheck = & docker version --format "{{.Server.Version}}" 2>$null
+                if ($LASTEXITCODE -eq 0 -and $quickCheck) {
+                    Write-Host "    [SUCCESS] Docker engine is running (Server version: $quickCheck)" -ForegroundColor Green
+                    $dockerRunning = $true
+                } else {
+                    $dockerRunning = $false
+                }
+            } catch {
+                $dockerRunning = $false
+            }
+            
+            # If quick check failed, try docker info with timeout
+            if (-not $dockerRunning) {
+                Write-Host "    [INFO] Quick check failed, trying detailed status check..." -ForegroundColor Cyan
+                
+                # Use a timeout for docker info to prevent hanging
+                $dockerInfoJob = Start-Job -ScriptBlock { & docker info 2>&1 | Out-Null; $LASTEXITCODE }
+                $dockerInfoResult = Wait-Job $dockerInfoJob -Timeout 10
+                
+                if ($dockerInfoResult) {
+                    $exitCode = Receive-Job $dockerInfoJob
+                    Remove-Job $dockerInfoJob
+                    $dockerRunning = ($exitCode -eq 0)
+                } else {
+                    Write-Host "    [WARNING] Docker info command timed out (Docker may be starting)" -ForegroundColor Yellow
+                    Stop-Job $dockerInfoJob -ErrorAction SilentlyContinue
+                    Remove-Job $dockerInfoJob -ErrorAction SilentlyContinue
+                    $dockerRunning = $false
+                }
+            }
+            
+            if (-not $dockerRunning) {
                 Write-Host "    [WARNING] Docker engine is not running" -ForegroundColor Yellow
                 Write-Host "    Attempting to start Docker Desktop..."
                 Write-Host ""
@@ -2165,12 +2341,24 @@ Host docker-$sshHostname
                         $attempt++
                         Write-Host "    Checking Docker daemon status... ($attempt/$maxAttempts)" -NoNewline
                         
-                        & docker info 2>&1 | Out-Null
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-Host " [SUCCESS]" -ForegroundColor Green
-                            break
+                        # Use timeout for docker info to prevent hanging
+                        $checkJob = Start-Job -ScriptBlock { & docker info 2>&1 | Out-Null; $LASTEXITCODE }
+                        $checkResult = Wait-Job $checkJob -Timeout 5
+                        
+                        if ($checkResult) {
+                            $checkExitCode = Receive-Job $checkJob
+                            Remove-Job $checkJob
+                            
+                            if ($checkExitCode -eq 0) {
+                                Write-Host " [SUCCESS]" -ForegroundColor Green
+                                break
+                            } else {
+                                Write-Host ""
+                            }
                         } else {
-                            Write-Host ""
+                            Write-Host " [TIMEOUT]"
+                            Stop-Job $checkJob -ErrorAction SilentlyContinue
+                            Remove-Job $checkJob -ErrorAction SilentlyContinue
                         }
                         
                         # Show different messages at different intervals
@@ -2182,9 +2370,21 @@ Host docker-$sshHostname
                         
                     } while ($attempt -lt $maxAttempts)
                     
-                    # Final check
-                    & docker info 2>&1 | Out-Null
-                    if ($LASTEXITCODE -eq 0) {
+                    # Final check with timeout
+                    $finalJob = Start-Job -ScriptBlock { & docker info 2>&1 | Out-Null; $LASTEXITCODE }
+                    $finalResult = Wait-Job $finalJob -Timeout 5
+                    
+                    if ($finalResult) {
+                        $finalExitCode = Receive-Job $finalJob
+                        Remove-Job $finalJob
+                    } else {
+                        Write-Host "    [WARNING] Final Docker check timed out" -ForegroundColor Yellow
+                        Stop-Job $finalJob -ErrorAction SilentlyContinue
+                        Remove-Job $finalJob -ErrorAction SilentlyContinue
+                        $finalExitCode = 1
+                    }
+                    
+                    if ($finalExitCode -eq 0) {
                         Write-Host "    [SUCCESS] Docker engine started successfully!" -ForegroundColor Green
                         Write-Host "    Startup time: $attempt seconds"
                     } else {
@@ -2202,7 +2402,16 @@ Host docker-$sshHostname
                         
                         if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
                             Write-Host "    [INFO] Please start Docker Desktop manually and click OK when ready" -ForegroundColor Cyan
-                            [System.Windows.Forms.MessageBox]::Show("Please start Docker Desktop manually and wait for it to be ready, then click OK to continue.", "Manual Start Required", "OK", "Information")
+                            $manualStartChoice = [System.Windows.Forms.MessageBox]::Show(
+                                "Please start Docker Desktop manually and wait for it to be ready, then click OK to continue.`n`nOr click Cancel to skip Docker checks and continue anyway.",
+                                "Manual Start Required", 
+                                "OKCancel", 
+                                "Information"
+                            )
+                            
+                            if ($manualStartChoice -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                                Write-Host "    [INFO] User chose to skip Docker checks and continue" -ForegroundColor Yellow
+                            }
                         } elseif ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
                             Write-Host "    [INFO] User chose to exit" -ForegroundColor Cyan
                             exit 1
@@ -2349,24 +2558,50 @@ function Test-RemoteSSHKeyFiles {
     }
     
     try {
-        # Check if private key exists on remote
+        # Check if private key exists on remote with timeout protection
         $checkPrivateKeyCommand = "test -f '$remoteSSHKeyPath' && echo PRIVATE_KEY_EXISTS || echo PRIVATE_KEY_MISSING"
-        $privateKeyCheckResult = & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkPrivateKeyCommand 2>&1
         
-        if ($privateKeyCheckResult -match "PRIVATE_KEY_EXISTS") {
-            $results.PrivateKeyExists = $true
+        # Use PowerShell job with timeout for SSH private key check
+        $privateKeyJob = Start-Job -ScriptBlock {
+            param($localSSHKeyPath, $RemoteHost, $checkPrivateKeyCommand)
+            & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkPrivateKeyCommand 2>&1
+        } -ArgumentList $localSSHKeyPath, $RemoteHost, $checkPrivateKeyCommand
+        
+        if (Wait-Job $privateKeyJob -Timeout 15) {
+            $privateKeyCheckResult = Receive-Job $privateKeyJob
+            Remove-Job $privateKeyJob
+            
+            if ($privateKeyCheckResult -match "PRIVATE_KEY_EXISTS") {
+                $results.PrivateKeyExists = $true
+            } else {
+                $results.ErrorDetails += "Private key not found at: $remoteSSHKeyPath (Result: $privateKeyCheckResult)"
+            }
         } else {
-            $results.ErrorDetails += "Private key not found at: $remoteSSHKeyPath (Result: $privateKeyCheckResult)"
+            Remove-Job $privateKeyJob -Force
+            $results.ErrorDetails += "Private key check timed out after 15 seconds"
         }
         
-        # Check if known_hosts exists on remote
+        # Check if known_hosts exists on remote with timeout protection
         $checkKnownHostsCommand = "test -f '$remoteKnownHostsPath' && echo KNOWN_HOSTS_EXISTS || echo KNOWN_HOSTS_MISSING"
-        $knownHostsCheckResult = & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkKnownHostsCommand 2>&1
         
-        if ($knownHostsCheckResult -match "KNOWN_HOSTS_EXISTS") {
-            $results.KnownHostsExists = $true
+        # Use PowerShell job with timeout for SSH known_hosts check
+        $knownHostsJob = Start-Job -ScriptBlock {
+            param($localSSHKeyPath, $RemoteHost, $checkKnownHostsCommand)
+            & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkKnownHostsCommand 2>&1
+        } -ArgumentList $localSSHKeyPath, $RemoteHost, $checkKnownHostsCommand
+        
+        if (Wait-Job $knownHostsJob -Timeout 15) {
+            $knownHostsCheckResult = Receive-Job $knownHostsJob
+            Remove-Job $knownHostsJob
+            
+            if ($knownHostsCheckResult -match "KNOWN_HOSTS_EXISTS") {
+                $results.KnownHostsExists = $true
+            } else {
+                $results.ErrorDetails += "Known_hosts file not found at: $remoteKnownHostsPath (Result: $knownHostsCheckResult)"
+            }
         } else {
-            $results.ErrorDetails += "Known_hosts file not found at: $remoteKnownHostsPath (Result: $knownHostsCheckResult)"
+            Remove-Job $knownHostsJob -Force
+            $results.ErrorDetails += "Known_hosts check timed out after 15 seconds"
         }
         
     } catch {
@@ -2392,7 +2627,22 @@ function Get-YamlPathValue {
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
         Write-Host "[INFO] Reading remote YAML file: $YamlPath" -ForegroundColor Cyan
-        $yamlContent = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cat '$YamlPath'" 2>$null
+        
+        # Use PowerShell job with timeout for YAML file reading
+        $yamlReadJob = Start-Job -ScriptBlock {
+            param($sshKeyPath, $remoteHost, $YamlPath)
+            & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cat '$YamlPath'" 2>$null
+        } -ArgumentList $sshKeyPath, $remoteHost, $YamlPath
+        
+        if (Wait-Job $yamlReadJob -Timeout 15) {
+            $yamlContent = Receive-Job $yamlReadJob
+            Remove-Job $yamlReadJob
+        } else {
+            Remove-Job $yamlReadJob -Force
+            Write-Host "Warning: YAML file reading timed out after 15 seconds"
+            $yamlContent = $null
+            $LASTEXITCODE = 1
+        }
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Warning: Could not read remote YAML file: $YamlPath"
@@ -2461,12 +2711,39 @@ function Test-AndCreateDirectory {
         Write-Host "[INFO] Checking remote directory ($PathKey): $remotePath" -ForegroundColor Cyan
         Write-Debug-Message "[DEBUG] SSH command: ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost"
         
-        $dirCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+        # Use PowerShell job with timeout for directory check
+        $dirCheckJob = Start-Job -ScriptBlock {
+            param($sshKeyPath, $remoteHost, $remotePath)
+            & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
+        } -ArgumentList $sshKeyPath, $remoteHost, $remotePath
+        
+        if (Wait-Job $dirCheckJob -Timeout 15) {
+            $dirCheck = Receive-Job $dirCheckJob
+            Remove-Job $dirCheckJob
+        } else {
+            Remove-Job $dirCheckJob -Force
+            Write-Host "[ERROR] Directory check timed out after 15 seconds for: $remotePath" -ForegroundColor Red
+            return $false
+        }
         Write-Debug-Message "[DEBUG] Directory check result: $dirCheck"
         
         if ($dirCheck -match "NOT_EXISTS") {
             Write-Host "[WARNING] Remote $PathKey path not found: $remotePath. Creating directory..." -ForegroundColor Yellow
-            $createResult = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "mkdir -p '$remotePath' && echo 'CREATED' || echo 'FAILED'" 2>&1
+            
+            # Use PowerShell job with timeout for directory creation
+            $createJob = Start-Job -ScriptBlock {
+                param($sshKeyPath, $remoteHost, $remotePath)
+                & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "mkdir -p '$remotePath' && echo 'CREATED' || echo 'FAILED'" 2>&1
+            } -ArgumentList $sshKeyPath, $remoteHost, $remotePath
+            
+            if (Wait-Job $createJob -Timeout 15) {
+                $createResult = Receive-Job $createJob
+                Remove-Job $createJob
+            } else {
+                Remove-Job $createJob -Force
+                Write-Host "[ERROR] Directory creation timed out after 15 seconds for: $remotePath" -ForegroundColor Red
+                return $false
+            }
             Write-Debug-Message "[DEBUG] Create result: $createResult"
             
             if ($createResult -match "CREATED") {
@@ -2479,7 +2756,20 @@ function Test-AndCreateDirectory {
             }
         } elseif ($dirCheck -match "EXISTS") {
             # Check if it's actually a directory, not a file
-            $isDirCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'DIR' || echo 'FILE'" 2>&1
+            # Use PowerShell job with timeout for directory type check
+            $isDirCheckJob = Start-Job -ScriptBlock {
+                param($sshKeyPath, $remoteHost, $remotePath)
+                & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -d '$remotePath' && echo 'DIR' || echo 'FILE'" 2>&1
+            } -ArgumentList $sshKeyPath, $remoteHost, $remotePath
+            
+            if (Wait-Job $isDirCheckJob -Timeout 15) {
+                $isDirCheck = Receive-Job $isDirCheckJob
+                Remove-Job $isDirCheckJob
+            } else {
+                Remove-Job $isDirCheckJob -Force
+                Write-Host "[ERROR] Directory type check timed out after 15 seconds for: $remotePath" -ForegroundColor Red
+                return $false
+            }
             Write-Debug-Message "[DEBUG] Directory type check result: $isDirCheck"
             
             if ($isDirCheck -match "FILE") {
