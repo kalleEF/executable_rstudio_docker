@@ -257,8 +257,13 @@ function Start-Spinner {
         [string]$Message = "Processing"
     )
     
-    # Stop any existing spinner
-    Stop-Spinner
+    # Only stop existing spinner if one is actually running
+    if ($script:spinnerJob) {
+        Write-Debug-Message "[DEBUG] Stopping existing spinner before starting new one"
+        Stop-Spinner
+    }
+    
+    Write-Debug-Message "[DEBUG] Starting spinner with message: '$Message'"
     
     # Start new spinner job
     $script:spinnerJob = Start-Job -ScriptBlock {
@@ -266,7 +271,12 @@ function Start-Spinner {
         $index = 0
         while ($true) {
             $char = $chars[$index % $chars.Length]
-            Write-Host "`r$msg $char" -NoNewline
+            if ($msg -and $msg.Trim()) {
+                Write-Host "`r$msg $char" -NoNewline
+            } else {
+                # For empty messages, just show the spinner character
+                Write-Host "`r $char" -NoNewline
+            }
             Start-Sleep -Milliseconds 200
             $index++
         }
@@ -4869,43 +4879,51 @@ $buttonStart.Add_Click({
                 Write-Host ""
 
                 # Build the Docker command as a single string for cmd /c execution
-                $dockerCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
+                $dockerCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache --progress=plain `"$dockerContextPath`""
                 Write-Debug-Message "[DEBUG] Docker command: $dockerCommand"
                 Write-Host ""
 
-                # Execute Docker build with spinner
-                Write-Host "[INFO] Building Docker image (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
-                Start-Spinner -Message ""
+                # Execute Docker build with real-time output
+                Write-Host "[INFO] Building Docker image (this may take 5-15 minutes)..." -ForegroundColor Cyan
+                Write-Host "[INFO] Docker build output (real-time):" -ForegroundColor Cyan
+                Write-Host ("-" * 60)
+                Write-Host "[DOCKER BUILD OUTPUT]" -ForegroundColor Blue
                 
                 try {
-                    # Use Invoke-Expression to run the command and show output directly
-                    $buildResult = & cmd /c $dockerCommand '2>&1'
-                    $buildSuccess = $LASTEXITCODE -eq 0
-                    Stop-Spinner
+                    # Execute Docker build with direct console output (no redirection)
+                    Write-Debug-Message "[DEBUG] Starting Docker build process with direct console streaming"
                     
-                    if ($buildSuccess) {
-                        Write-Host ""
-                        Write-Host " [SUCCESS]" -ForegroundColor Green
-                        Write-Host ""
-                    } else {
-                        Write-Host ""
-                        Write-Host " [FAILED]" -ForegroundColor Red
-                        Write-Host ""
-                    }
-                    Write-Host ""
-
-                    # Display the output
-                    Write-Host "[DOCKER BUILD OUTPUT]"
+                    # Use Start-Process without output redirection for true real-time display
+                    # This allows Docker to write directly to the console
+                    $arguments = @(
+                        "build"
+                        "-f"
+                        "`"$dockerfilePath`""
+                        "-t"
+                        $DockerImageName
+                        "--no-cache"
+                        "--progress=plain"
+                        "`"$dockerContextPath`""
+                    )
+                    
+                    Write-Debug-Message "[DEBUG] Docker arguments: $($arguments -join ' ')"
+                    
+                    # Start the process with direct console output (no redirection)
+                    $process = Start-Process -FilePath "docker" -ArgumentList $arguments -Wait -PassThru -NoNewWindow
+                    
+                    $buildSuccess = $process.ExitCode -eq 0
+                    
                     Write-Host ("-" * 60)
-                    if ($buildResult) {
-                        foreach ($line in $buildResult) {
-                            Write-Host "[DOCKER] $line"
-                        }
+                    if ($buildSuccess) {
+                        Write-Host "[SUCCESS] Docker build completed successfully!" -ForegroundColor Green
+                        $buildResult = "Build process completed successfully with exit code: 0"
+                    } else {
+                        Write-Host "[FAILED] Docker build failed!" -ForegroundColor Red
+                        $buildResult = "Build process failed with exit code: $($process.ExitCode)"
                     }
-                } catch {
-                    Stop-Spinner
-                    Write-Host " [FAILED]" -ForegroundColor Red
                     Write-Host ""
+                } catch {
+                    Write-Host ("-" * 60)
                     Write-Host "[ERROR] Exception during Docker build: $($_.Exception.Message)" -ForegroundColor Red
                     $buildSuccess = $false
                     $buildResult = "Build failed with exception: $($_.Exception.Message)"
@@ -4920,49 +4938,51 @@ $buttonStart.Add_Click({
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
                 Write-Host ""
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
+                $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
                 Write-Host ""
 
-                # Execute remote Docker build with spinner
-                Write-Host "[INFO] Building Docker image on remote host (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
-                Start-Spinner -Message ""
+                # Execute remote Docker build with real-time output
+                Write-Host "[INFO] Building Docker image on remote host (this may take 5-15 minutes)..." -ForegroundColor Cyan
+                Write-Host "[INFO] Remote Docker build output (real-time):" -ForegroundColor Cyan
+                Write-Host ("-" * 60)
+                Write-Host "[DOCKER BUILD OUTPUT]" -ForegroundColor Blue
 
                 try {
-                    # Execute SSH command directly and show output in real-time with proper authentication
+                    # Execute SSH command with direct console output (no redirection)
                     Set-DockerSSHEnvironment
                     $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-                    $sshCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$buildCommand`""
-                    Write-Debug-Message "[DEBUG] SSH command: $sshCommand"
-                    Write-Host ""
+                    Write-Debug-Message "[DEBUG] SSH command for remote build with direct console streaming"
 
-                    $buildResult = & cmd /c $sshCommand '2>&1'
-                    $buildSuccess = $LASTEXITCODE -eq 0
-                    Stop-Spinner
+                    # Use Start-Process for SSH without output redirection for true real-time display
+                    $sshArguments = @(
+                        "-o", "ConnectTimeout=30"
+                        "-o", "BatchMode=yes"
+                        "-o", "PasswordAuthentication=no"
+                        "-o", "PubkeyAuthentication=yes"
+                        "-o", "IdentitiesOnly=yes"
+                        "-i", "`"$sshKeyPath`""
+                        $remoteHost
+                        "`"$buildCommand`""
+                    )
                     
-                    if ($buildSuccess) {
-                        Write-Host ""
-                        Write-Host " [SUCCESS]" -ForegroundColor Green
-                        Write-Host ""
-                    } else {
-                        Write-Host ""
-                        Write-Host " [FAILED]" -ForegroundColor Red
-                        Write-Host ""
-                    }
-                    Write-Host ""
-
-                    # Display the output
-                    Write-Host "[REMOTE DOCKER BUILD OUTPUT]"
+                    Write-Debug-Message "[DEBUG] SSH arguments: $($sshArguments -join ' ')"
+                    
+                    # Start the SSH process with direct console output (no redirection)
+                    $process = Start-Process -FilePath "ssh" -ArgumentList $sshArguments -Wait -PassThru -NoNewWindow
+                    
+                    $buildSuccess = $process.ExitCode -eq 0
+                    
                     Write-Host ("-" * 60)
-                    if ($buildResult) {
-                        foreach ($line in $buildResult) {
-                            Write-Host "[REMOTE] $line"
-                        }
+                    if ($buildSuccess) {
+                        Write-Host "[SUCCESS] Remote Docker build completed successfully!" -ForegroundColor Green
+                        $buildResult = "Remote build process completed successfully with exit code: 0"
+                    } else {
+                        Write-Host "[FAILED] Remote Docker build failed!" -ForegroundColor Red
+                        $buildResult = "Remote build process failed with exit code: $($process.ExitCode)"
                     }
+                    Write-Host ""
                 } catch {
-                    Stop-Spinner
-                    Write-Host ""
-                    Write-Host " [FAILED]" -ForegroundColor Red
-                    Write-Host ""
+                    Write-Host ("-" * 60)
                     Write-Host "[ERROR] Exception during remote Docker build: $($_.Exception.Message)" -ForegroundColor Red
                     $buildSuccess = $false
                     $buildResult = "Remote build failed with exception: $($_.Exception.Message)"
@@ -5040,45 +5060,47 @@ $buttonStart.Add_Click({
                             Write-Host ""
 
                             # Build the Docker command for prerequisite
-                            $prereqCommand = "docker build -f `"$prereqDockerfilePath`" -t $prereqImageName --no-cache `"$prereqDockerContextPath`""
+                            $prereqCommand = "docker build -f `"$prereqDockerfilePath`" -t $prereqImageName --no-cache --progress=plain `"$prereqDockerContextPath`""
                             Write-Debug-Message "[DEBUG] Prerequisite command: $prereqCommand"
-                            Write-Host ""
-
-                            # Execute prerequisite build with spinner
-                            Write-Host "[INFO] Building prerequisite image (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
-                            Start-Spinner -Message ""
-                            Write-Host ""
+                            # Execute prerequisite build with real-time output
+                            Write-Host "[INFO] Building prerequisite image (this may take 5-15 minutes)..." -ForegroundColor Cyan
+                            Write-Host "[INFO] Prerequisite build output (real-time):" -ForegroundColor Cyan
+                            Write-Host ("-" * 60)
+                            Write-Host "[DOCKER PREREQUISITE BUILD OUTPUT]" -ForegroundColor Blue
 
                             try {
-                                # Execute prerequisite build directly and show output in real-time
-                                $prereqBuildResult = & cmd /c $prereqCommand '2>&1'
-                                $prereqBuildSuccess = $LASTEXITCODE -eq 0
-                                Stop-Spinner
+                                # Execute prerequisite build with direct console output
+                                Write-Debug-Message "[DEBUG] Starting prerequisite build with direct console streaming"
                                 
-                                if ($prereqBuildSuccess) {
-                                    Write-Host ""
-                                    Write-Host " [SUCCESS]" -ForegroundColor Green
-                                    Write-Host ""
-                                } else {
-                                    Write-Host ""
-                                    Write-Host " [FAILED]" -ForegroundColor Red
-                                    Write-Host ""
-                                }
-                                Write-Host ""
-
-                                # Display the output
-                                Write-Host "[PREREQUISITE BUILD OUTPUT]"
+                                # Use Start-Process without output redirection for true real-time display
+                                $dockerArguments = @(
+                                    "build"
+                                    "-f", "`"$prereqDockerfilePath`""
+                                    "-t", $prereqImageName
+                                    "--no-cache"
+                                    "--progress=plain"
+                                    "`"$prereqDockerContextPath`""
+                                )
+                                
+                                Write-Debug-Message "[DEBUG] Docker prerequisite arguments: $($dockerArguments -join ' ')"
+                                
+                                # Start the Docker process with direct console output
+                                $process = Start-Process -FilePath "docker" -ArgumentList $dockerArguments -Wait -PassThru -NoNewWindow
+                                
+                                $prereqBuildSuccess = $process.ExitCode -eq 0
+                                Get-EventSubscriber | Where-Object { $_.SourceObject -eq $process } | Unregister-Event
+                                
                                 Write-Host ("-" * 60)
-                                if ($prereqBuildResult) {
-                                    foreach ($line in $prereqBuildResult) {
-                                        Write-Host "[DOCKER-PREREQ] $line"
-                                    }
+                                if ($prereqBuildSuccess) {
+                                    Write-Host "[SUCCESS] Prerequisite build completed successfully!" -ForegroundColor Green
+                                    $prereqBuildResult = "Prerequisite build process completed successfully with exit code: 0"
+                                } else {
+                                    Write-Host "[FAILED] Prerequisite build failed!" -ForegroundColor Red
+                                    $prereqBuildResult = "Prerequisite build process failed with exit code: $($process.ExitCode)"
                                 }
+                                Write-Host ""
                             } catch {
-                                Stop-Spinner
-                                Write-Host ""
-                                Write-Host " [FAILED]" -ForegroundColor Red
-                                Write-Host ""
+                                Write-Host ("-" * 60)
                                 Write-Host "[ERROR] Exception during prerequisite build: $($_.Exception.Message)" -ForegroundColor Red
                                 $prereqBuildSuccess = $false
                                 $prereqBuildResult = "Prerequisite build failed with exception: $($_.Exception.Message)"
@@ -5089,51 +5111,52 @@ $buttonStart.Add_Click({
 
                         } else {
                             # Remote build of prerequisite with real-time output
-                            Write-Host ""
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
                             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                            $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache . 2>&1"
-                            Write-Host ""
+                            $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache --progress=plain . 2>&1"
 
-                            # Execute remote prerequisite build with spinner
-                            Write-Host "[INFO] Building prerequisite image on remote host (this may take 5-15 minutes)..." -NoNewline -ForegroundColor Cyan
-                            Start-Spinner -Message ""
+                            # Execute remote prerequisite build with real-time output
+                            Write-Host "[INFO] Building prerequisite image on remote host (this may take 5-15 minutes)..." -ForegroundColor Cyan
+                            Write-Host "[INFO] Remote prerequisite build output (real-time):" -ForegroundColor Cyan
+                            Write-Host ("-" * 60)
+                            Write-Host "[DOCKER PREREQUISITE BUILD OUTPUT]" -ForegroundColor Blue
 
                             try {
-                                # Execute SSH prerequisite command directly and show output in real-time with proper authentication
+                                # Execute SSH prerequisite command with direct console output
                                 Set-DockerSSHEnvironment
                                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-                                $prereqSSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$prereqBuildCommand`""
-                                Write-Debug-Message "[DEBUG] SSH prerequisite command: $prereqSSHCommand"
+                                Write-Debug-Message "[DEBUG] SSH prerequisite command for remote build with direct console streaming"
 
-                                $prereqBuildResult = & cmd /c $prereqSSHCommand '2>&1'
-                                $prereqBuildSuccess = $LASTEXITCODE -eq 0
-                                Stop-Spinner
+                                # Use Start-Process for SSH prerequisite without output redirection
+                                $sshArguments = @(
+                                    "-o", "ConnectTimeout=30"
+                                    "-o", "BatchMode=yes"
+                                    "-o", "PasswordAuthentication=no"
+                                    "-o", "PubkeyAuthentication=yes"
+                                    "-o", "IdentitiesOnly=yes"
+                                    "-i", "`"$sshKeyPath`""
+                                    $remoteHost
+                                    "`"$prereqBuildCommand`""
+                                )
                                 
-                                if ($prereqBuildSuccess) {
-                                    Write-Host ""
-                                    Write-Host " [SUCCESS]" -ForegroundColor Green
-                                    Write-Host ""
-                                } else {
-                                    Write-Host ""
-                                    Write-Host " [FAILED]" -ForegroundColor Red
-                                    Write-Host ""
-                                }
-                                Write-Host ""
-
-                                # Display the output
-                                Write-Host "[REMOTE DOCKER PREREQUISITE BUILD OUTPUT]"
+                                Write-Debug-Message "[DEBUG] SSH prerequisite arguments: $($sshArguments -join ' ')"
+                                
+                                # Start the SSH process with direct console output
+                                $process = Start-Process -FilePath "ssh" -ArgumentList $sshArguments -Wait -PassThru -NoNewWindow
+                                
+                                $prereqBuildSuccess = $process.ExitCode -eq 0
+                                
                                 Write-Host ("-" * 60)
-                                if ($prereqBuildResult) {
-                                    foreach ($line in $prereqBuildResult) {
-                                        Write-Host "[DOCKER-PREREQ-REMOTE] $line"
-                                    }
+                                if ($prereqBuildSuccess) {
+                                    Write-Host "[SUCCESS] Remote prerequisite build completed successfully!" -ForegroundColor Green
+                                    $prereqBuildResult = "Remote prerequisite build process completed successfully with exit code: 0"
+                                } else {
+                                    Write-Host "[FAILED] Remote prerequisite build failed!" -ForegroundColor Red
+                                    $prereqBuildResult = "Remote prerequisite build process failed with exit code: $($process.ExitCode)"
                                 }
+                                Write-Host ""
                             } catch {
-                                Stop-Spinner
-                                Write-Host ""
-                                Write-Host " [FAILED]" -ForegroundColor Red
-                                Write-Host ""
+                                Write-Host ("-" * 60)
                                 Write-Host "[ERROR] Exception during remote prerequisite build: $($_.Exception.Message)" -ForegroundColor Red
                                 $prereqBuildSuccess = $false
                                 $prereqBuildResult = "Remote prerequisite build failed with exception: $($_.Exception.Message)"
@@ -5167,45 +5190,49 @@ $buttonStart.Add_Click({
                                     Write-Host ""
 
                                     # Build the Docker command for retry
-                                    $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache `"$dockerContextPath`""
+                                    $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache --progress=plain `"$dockerContextPath`""
                                     Write-Debug-Message "[DEBUG] Retry command: $retryCommand"
                                     Write-Host ""
 
-                                    # Execute retry build with spinner
-                                    Write-Host ""
-                                    Write-Host "[INFO] Retrying main image build (should be faster with prerequisite)..." -NoNewline -ForegroundColor Cyan
-                                    Start-Spinner -Message ""
+                                    # Execute retry build with real-time output
+                                    Write-Host "[INFO] Retrying main image build (should be faster with prerequisite)..." -ForegroundColor Cyan
+                                    Write-Host "[INFO] Retry build output (real-time):" -ForegroundColor Cyan
+                                    Write-Host ("-" * 60)
+                                    Write-Host "[DOCKER RETRY BUILD OUTPUT]" -ForegroundColor Blue
 
                                     try {
-                                        # Execute retry build directly and show output in real-time
-                                        $retryBuildResult = & cmd /c $retryCommand '2>&1'
-                                        $retryBuildSuccess = $LASTEXITCODE -eq 0
-                                        Stop-Spinner
+                                        # Execute retry build with direct console output
+                                        Write-Debug-Message "[DEBUG] Starting retry build with direct console streaming"
                                         
-                                        if ($retryBuildSuccess) {
-                                            Write-Host ""
-                                            Write-Host " [SUCCESS]" -ForegroundColor Green
-                                            Write-Host ""
-                                        } else {
-                                            Write-Host ""
-                                            Write-Host " [FAILED]" -ForegroundColor Red
-                                            Write-Host ""
-                                        }
-                                        Write-Host ""
-
-                                        # Display the output
-                                        Write-Host "[DOCKER-RETRY BUILD OUTPUT]"
+                                        # Use Start-Process without output redirection for true real-time display
+                                        $dockerArguments = @(
+                                            "build"
+                                            "-f", "`"$dockerfilePath`""
+                                            "-t", $DockerImageName
+                                            "--no-cache"
+                                            "--progress=plain"
+                                            "`"$dockerContextPath`""
+                                        )
+                                        
+                                        Write-Debug-Message "[DEBUG] Docker retry arguments: $($dockerArguments -join ' ')"
+                                        
+                                        # Start the Docker process with direct console output
+                                        $process = Start-Process -FilePath "docker" -ArgumentList $dockerArguments -Wait -PassThru -NoNewWindow
+                                        
+                                        $retryBuildSuccess = $process.ExitCode -eq 0
+                                        Get-EventSubscriber | Where-Object { $_.SourceObject -eq $process } | Unregister-Event
+                                        
                                         Write-Host ("-" * 60)
-                                        if ($retryBuildResult) {
-                                            foreach ($line in $retryBuildResult) {
-                                                Write-Host "[DOCKER-RETRY] $line"
-                                            }
+                                        if ($retryBuildSuccess) {
+                                            Write-Host "[SUCCESS] Retry build completed successfully!" -ForegroundColor Green
+                                            $retryBuildResult = "Retry build process completed successfully with exit code: 0"
+                                        } else {
+                                            Write-Host "[FAILED] Retry build failed!" -ForegroundColor Red
+                                            $retryBuildResult = "Retry build process failed with exit code: $($process.ExitCode)"
                                         }
+                                        Write-Host ""
                                     } catch {
-                                        Stop-Spinner
-                                        Write-Host ""
-                                        Write-Host " [FAILED]" -ForegroundColor Red
-                                        Write-Host ""
+                                        Write-Host ("-" * 60)
                                         Write-Host "[ERROR] Exception during retry build: $($_.Exception.Message)" -ForegroundColor Red
                                         $retryBuildSuccess = $false
                                         $retryBuildResult = "Retry build failed with exception: $($_.Exception.Message)"
@@ -5218,50 +5245,51 @@ $buttonStart.Add_Click({
                                     # Remote build retry with real-time output
                                     Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
                                     $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                                    $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache . 2>&1"
-                                    Write-Host ""
+                                    $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
 
-                                    # Execute remote retry build with spinner
-                                    Write-Host ""
-                                    Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -NoNewline -ForegroundColor Cyan
-                                    Start-Spinner -Message ""
+                                    # Execute remote retry build with real-time output
+                                    Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -ForegroundColor Cyan
+                                    Write-Host "[INFO] Remote retry build output (real-time):" -ForegroundColor Cyan
+                                    Write-Host ("-" * 60)
+                                    Write-Host "[DOCKER RETRY BUILD OUTPUT]" -ForegroundColor Blue
 
                                     try {
-                                        # Execute SSH retry command directly and show output in real-time with proper authentication
+                                        # Execute SSH retry command with direct console output
                                         Set-DockerSSHEnvironment
                                         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-                                        $retrySSHCommand = "ssh -o ConnectTimeout=30 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost `"$retryBuildCommand`""
-                                        Write-Host ""
-                                        Write-Debug-Message "[DEBUG] SSH retry command: $retrySSHCommand"
+                                        Write-Debug-Message "[DEBUG] SSH retry command for remote build with direct console streaming"
 
-                                        $retryBuildResult = & cmd /c $retrySSHCommand '2>&1'
-                                        $retryBuildSuccess = $LASTEXITCODE -eq 0
-                                        Stop-Spinner
+                                        # Use Start-Process for SSH retry without output redirection
+                                        $sshArguments = @(
+                                            "-o", "ConnectTimeout=30"
+                                            "-o", "BatchMode=yes"
+                                            "-o", "PasswordAuthentication=no"
+                                            "-o", "PubkeyAuthentication=yes"
+                                            "-o", "IdentitiesOnly=yes"
+                                            "-i", "`"$sshKeyPath`""
+                                            $remoteHost
+                                            "`"$retryBuildCommand`""
+                                        )
                                         
-                                        if ($retryBuildSuccess) {
-                                            Write-Host ""
-                                            Write-Host " [SUCCESS]" -ForegroundColor Green
-                                            Write-Host ""
-                                        } else {
-                                            Write-Host ""
-                                            Write-Host " [FAILED]" -ForegroundColor Red
-                                            Write-Host ""
-                                        }
-                                        Write-Host ""
-
-                                        # Display the output
-                                        Write-Host "[REMOTE DOCKER RETRY BUILD OUTPUT]"
+                                        Write-Debug-Message "[DEBUG] SSH retry arguments: $($sshArguments -join ' ')"
+                                        
+                                        # Start the SSH process with direct console output
+                                        $process = Start-Process -FilePath "ssh" -ArgumentList $sshArguments -Wait -PassThru -NoNewWindow
+                                        
+                                        $retryBuildSuccess = $process.ExitCode -eq 0
+                                        Get-EventSubscriber | Where-Object { $_.SourceObject -eq $process } | Unregister-Event
+                                        
                                         Write-Host ("-" * 60)
-                                        if ($retryBuildResult) {
-                                            foreach ($line in $retryBuildResult) {
-                                                Write-Host "[DOCKER-RETRY-REMOTE] $line"
-                                            }
+                                        if ($retryBuildSuccess) {
+                                            Write-Host "[SUCCESS] Remote retry build completed successfully!" -ForegroundColor Green
+                                            $retryBuildResult = "Remote retry build process completed successfully with exit code: 0"
+                                        } else {
+                                            Write-Host "[FAILED] Remote retry build failed!" -ForegroundColor Red
+                                            $retryBuildResult = "Remote retry build process failed with exit code: $($process.ExitCode)"
                                         }
+                                        Write-Host ""
                                     } catch {
-                                        Stop-Spinner
-                                        Write-Host ""
-                                        Write-Host " [FAILED]" -ForegroundColor Red
-                                        Write-Host ""
+                                        Write-Host ("-" * 60)
                                         Write-Host "[ERROR] Exception during remote retry build: $($_.Exception.Message)" -ForegroundColor Red
                                         $retryBuildSuccess = $false
                                         $retryBuildResult = "Remote retry build failed with exception: $($_.Exception.Message)"
