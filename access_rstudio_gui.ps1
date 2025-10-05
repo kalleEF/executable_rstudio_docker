@@ -44,11 +44,18 @@ function Write-Debug-Message {
 #   POWERSHELL VERSION CHECK            #
 #--------------------------------------#
 
+Write-Debug-Message "[DEBUG] Starting PowerShell version check..."
+Write-Debug-Message "[DEBUG] Current PowerShell version: $($PSVersionTable.PSVersion)"
+Write-Debug-Message "[DEBUG] PowerShell edition: $($PSVersionTable.PSEdition)"
+
 # Check PowerShell version and recommend PowerShell 7 if needed
 if ($PSVersionTable.PSVersion.Major -lt 6) {
+    Write-Debug-Message "[DEBUG] Detected Windows PowerShell (version < 6), checking for PowerShell 7..."
     $pwshAvailable = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    Write-Debug-Message "[DEBUG] PowerShell 7 availability check: $(if($pwshAvailable) { 'Available' } else { 'Not found' })"
     
     if ($pwshAvailable) {
+        Write-Debug-Message "[DEBUG] PowerShell 7 found at: $($pwshAvailable.Source)"
         Write-Host ""
         Write-Host "  [NOTICE] You're running Windows PowerShell 5.1" -ForegroundColor Yellow
         Write-Host "  PowerShell 7 is available on your system and provides better compatibility." -ForegroundColor Yellow
@@ -59,18 +66,25 @@ if ($PSVersionTable.PSVersion.Major -lt 6) {
         
         # Ask user if they want to restart with PowerShell 7
         $usePS7 = Read-Host "  Would you like to restart with PowerShell 7 now? (y/n)"
+        Write-Debug-Message "[DEBUG] User PowerShell 7 restart choice: $usePS7"
         if ($usePS7 -match "^[Yy]") {
+            Write-Debug-Message "[DEBUG] User chose to restart with PowerShell 7"
             Write-Host "  Restarting with PowerShell 7..." -ForegroundColor Green
             try {
+                Write-Debug-Message "[DEBUG] Attempting to start PowerShell 7 with arguments: -ExecutionPolicy Bypass -File '$($MyInvocation.MyCommand.Path)'"
                 Start-Process "pwsh" -ArgumentList "-ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -Wait
+                Write-Debug-Message "[DEBUG] PowerShell 7 restart successful, exiting current session"
                 exit
             } catch {
+                Write-Debug-Message "[DEBUG] PowerShell 7 restart failed: $($_.Exception.Message)"
                 Write-Host "  Failed to restart with PowerShell 7. Continuing with Windows PowerShell 5.1..." -ForegroundColor Yellow
             }
         } else {
+            Write-Debug-Message "[DEBUG] User chose to continue with Windows PowerShell 5.1"
             Write-Host "  Continuing with Windows PowerShell 5.1..." -ForegroundColor Yellow
         }
     } else {
+        Write-Debug-Message "[DEBUG] PowerShell 7 not available, showing installation recommendation"
         Write-Host ""
         Write-Host "  [RECOMMENDATION] PowerShell 7 Installation" -ForegroundColor Yellow
         Write-Host "  ===========================================" -ForegroundColor Yellow
@@ -123,10 +137,15 @@ if ($PSVersionTable.PSVersion.Major -lt 6) {
 #   ADMINISTRATOR PRIVILEGE CHECK       #
 #--------------------------------------#
 
+Write-Debug-Message "[DEBUG] Checking administrator privileges..."
+
 # Check if running as administrator
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
 
+Write-Debug-Message "[DEBUG] Administrator privileges: $(if($isAdmin) { 'Present' } else { 'Missing' })"
+
 if (-not $isAdmin) {
+    Write-Debug-Message "[DEBUG] Administrator privileges required, attempting elevation..."
     Write-Host ""
     Write-Host "NOTICE: This script requires administrator privileges for Docker operations."
     Write-Host "Attempting to restart with elevated privileges..."
@@ -135,15 +154,18 @@ if (-not $isAdmin) {
     try {
         # Get the current script path
         $scriptPath = $MyInvocation.MyCommand.Path
+        Write-Debug-Message "[DEBUG] Current script path: $scriptPath"
         
         # If running as a script file
         if ($scriptPath) {
+            Write-Debug-Message "[DEBUG] Running as script file, proceeding with elevation"
             # Use the current PowerShell executable for restart
             $currentPSExecutable = if ($PSVersionTable.PSVersion.Major -ge 6) { 
                 "pwsh" 
             } else { 
                 "PowerShell" 
             }
+            Write-Debug-Message "[DEBUG] Selected PowerShell executable for elevation: $currentPSExecutable"
             
             Write-Host "  Restarting with elevated privileges using: $currentPSExecutable" -ForegroundColor Cyan
             
@@ -167,6 +189,7 @@ if (-not $isAdmin) {
         exit 1
     }
 } else {
+    Write-Debug-Message "[DEBUG] Administrator privileges confirmed, continuing with script execution"
     Write-Host ""
     Write-Host "[SUCCESS] Running with Administrator privileges" -ForegroundColor Green
     Write-Host ""
@@ -176,12 +199,33 @@ if (-not $isAdmin) {
 #   TERMINAL COLOR CONFIGURATION       #
 #--------------------------------------#
 
+Write-Debug-Message "[DEBUG] Configuring terminal colors..."
+
 # Set terminal background to black and configure color scheme
 try {
     $Host.UI.RawUI.BackgroundColor = "Black"
     $Host.UI.RawUI.ForegroundColor = "White"
+    
+    # Increase terminal font size if possible
+    try {
+        # Try to access font properties (may not work in all terminal types)
+        if ($Host.UI.RawUI.WindowSize) {
+            # Set a larger buffer size for better readability
+            $currentSize = $Host.UI.RawUI.BufferSize
+            if ($currentSize.Width -lt 120) {
+                $newSize = New-Object System.Management.Automation.Host.Size(120, $currentSize.Height)
+                $Host.UI.RawUI.BufferSize = $newSize
+            }
+            Write-Debug-Message "[DEBUG] Terminal buffer size configured for better readability"
+        }
+    } catch {
+        Write-Debug-Message "[DEBUG] Could not modify terminal font/buffer settings: $($_.Exception.Message)"
+    }
+    
     Clear-Host
+    Write-Debug-Message "[DEBUG] Terminal colors configured successfully (Black background, White foreground)"
 } catch {
+    Write-Debug-Message "[DEBUG] Terminal color configuration failed: $($_.Exception.Message)"
     # Fallback if terminal doesn't support color changes
     Write-Host "Note: Terminal color configuration not supported on this system" -ForegroundColor Yellow
 }
@@ -190,10 +234,14 @@ try {
 #   STEP 0: SETUP AND PRE-REQUISITES   #
 #--------------------------------------#
 
+Write-Debug-Message "[DEBUG] STEP 0: Initializing setup and prerequisites..."
+
 # Ensure Windows Forms app environment
+Write-Debug-Message "[DEBUG] Loading Windows Forms assemblies..."
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+Write-Debug-Message "[DEBUG] Windows Forms environment configured successfully"
 
 #--------------------------------------#
 #   SPINNER FUNCTIONS FOR BUILD FEEDBACK   #
@@ -226,11 +274,15 @@ function Start-Spinner {
 }
 
 function Stop-Spinner {
+    Write-Debug-Message "[DEBUG] Stopping spinner..."
     if ($script:spinnerJob) {
         Stop-Job $script:spinnerJob -ErrorAction SilentlyContinue
         Remove-Job $script:spinnerJob -ErrorAction SilentlyContinue
         $script:spinnerJob = $null
         Write-Host "`r" -NoNewline  # Clear the spinner line
+        Write-Debug-Message "[DEBUG] Spinner stopped and cleaned up"
+    } else {
+        Write-Debug-Message "[DEBUG] No active spinner to stop"
     }
 }
 
@@ -240,6 +292,8 @@ function Show-SpinnerWithProgress {
         [ScriptBlock]$ScriptBlock
     )
     
+    Write-Debug-Message "[DEBUG] Starting progress spinner for: '$Message'"
+    
     Write-Host "$Message" -NoNewline
     Start-Spinner -Message ""
     
@@ -247,10 +301,12 @@ function Show-SpinnerWithProgress {
         $result = & $ScriptBlock
         Stop-Spinner
         Write-Host " [SUCCESS]" -ForegroundColor Green
+        Write-Debug-Message "[DEBUG] Progress spinner completed successfully"
         return $result
     } catch {
         Stop-Spinner
         Write-Host " [FAILED]" -ForegroundColor Red
+        Write-Debug-Message "[DEBUG] Progress spinner failed: $($_.Exception.Message)"
         throw
     }
 }
@@ -258,6 +314,8 @@ function Show-SpinnerWithProgress {
 #----------------------------------------------#
 #   STEP 1: PROMPT FOR USERNAME AND PASSWORD   #
 #----------------------------------------------#
+
+Write-Debug-Message "[DEBUG] STEP 1: Starting username and password collection..."
 
 Write-Host "
                                                                      ,----,                
@@ -314,6 +372,8 @@ Write-Host ""
 Write-Host "Initializing application..."
 Write-Host ""
 
+Write-Debug-Message "[DEBUG] Creating main credentials form..."
+
 # Build the form
 $form = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Remote Access - IMPACT NCD Germany'
@@ -322,6 +382,8 @@ $form = New-Object System.Windows.Forms.Form -Property @{
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
 }
+
+Write-Debug-Message "[DEBUG] Adding form controls (labels, textboxes, buttons)..."
 
 # Instruction label
 $labelInstruction = New-Object System.Windows.Forms.Label -Property @{ 
@@ -406,7 +468,9 @@ $buttonOK.Add_Click({
 })
 
 # Show the dialog and capture the result
+Write-Debug-Message "[DEBUG] Displaying credentials form to user..."
 $result = $form.ShowDialog()
+Write-Debug-Message "[DEBUG] Credentials form result: $result"
 
 # Initialize variables
 $USERNAME = $null
@@ -414,14 +478,19 @@ $PASSWORD = $null
 
 # If user clicked OK, save the values
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Debug-Message "[DEBUG] Processing user credentials..."
     # Normalize username: remove spaces and convert to lowercase for consistency
     $originalUsername = $textUser.Text.Trim()
+    Write-Debug-Message "[DEBUG] Original username: '$originalUsername'"
     # Fix: Ensure USERNAME is always a string, not an array
     $USERNAME = ($originalUsername -replace '\s+', '').ToLower()
     $PASSWORD = $textPass.Text
+    Write-Debug-Message "[DEBUG] Normalized username: '$USERNAME'"
+    Write-Debug-Message "[DEBUG] Password length: $($PASSWORD.Length) characters"
     
     # Validate that USERNAME is not empty after normalization
     if ([string]::IsNullOrWhiteSpace($USERNAME)) {
+        Write-Debug-Message "[DEBUG] Username validation failed - empty after normalization"
         Write-Host ""
         Write-Host "[ERROR] Username became empty after normalization" -ForegroundColor Red
         Write-Host ""
@@ -429,6 +498,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         exit 1
     }
     
+    Write-Debug-Message "[DEBUG] Credentials validation successful"
     Write-Host ""
     Write-Host "[SUCCESS] Credentials collected successfully" -ForegroundColor Green
     if ($originalUsername -ne $USERNAME) {
@@ -451,8 +521,11 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 #   STEP 2: SETUP AND PROMPT FOR GitHub SSH KEY   #
 #-------------------------------------------------#
 
+Write-Debug-Message "[DEBUG] STEP 2: Starting SSH key setup for GitHub integration..."
+
 # Only proceed if user provided credentials
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Debug-Message "[DEBUG] Credentials validated, proceeding with SSH key setup"
     Write-Host ""
     Write-Host "================================================"
     Write-Host "  STEP 2: SSH Key Setup for GitHub Integration"
@@ -462,9 +535,20 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     # Define SSH key paths (individual per user)
     $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
     $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME.pub"
+    
+    Write-Debug-Message "[DEBUG] SSH key paths defined:"
+    Write-Debug-Message "[DEBUG]   Private key: $sshKeyPath"
+    Write-Debug-Message "[DEBUG]   Public key: $sshPublicKeyPath"
 
     # Check if SSH key already exists
+    Write-Debug-Message "[DEBUG] Checking for existing SSH keys..."
+    $privateKeyExists = Test-Path $sshKeyPath
+    $publicKeyExists = Test-Path $sshPublicKeyPath
+    Write-Debug-Message "[DEBUG] Private key exists: $privateKeyExists"
+    Write-Debug-Message "[DEBUG] Public key exists: $publicKeyExists"
+    
     if ((Test-Path $sshKeyPath) -and (Test-Path $sshPublicKeyPath)) {
+        Write-Debug-Message "[DEBUG] Both SSH keys found, using existing keys"
         Write-Host "[INFO] SSH key already exists" -ForegroundColor Cyan
         Write-Host "  Location: $sshKeyPath"
         Write-Host ""
@@ -489,17 +573,24 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 
         Write-Host "[INFO] Generating new SSH key for Docker operations..." -ForegroundColor Cyan
         Write-Host ""
+        Write-Debug-Message "[DEBUG] SSH keys not found, generating new keys..."
         
         # Ensure .ssh directory exists
         $sshDir = "$HOME\.ssh"
+        Write-Debug-Message "[DEBUG] Checking SSH directory: $sshDir"
         if (-not (Test-Path $sshDir)) {
+            Write-Debug-Message "[DEBUG] SSH directory does not exist, creating it..."
             New-Item -Path $sshDir -ItemType Directory -Force | Out-Null
+            Write-Debug-Message "[DEBUG] SSH directory created successfully"
             Write-Host ""
             Write-Host "  Created .ssh directory"
             Write-Host ""
+        } else {
+            Write-Debug-Message "[DEBUG] SSH directory already exists"
         }
         
         # Generate the SSH key (without passphrase for automation)
+        Write-Debug-Message "[DEBUG] Preparing SSH key generation parameters..."
         Write-Host "  Generating SSH key with parameters:"
         Write-Host "  - Type: ed25519"
         Write-Host "  - Comment: IMPACT_$USERNAME"  
@@ -515,11 +606,16 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             '-q'  # Quiet mode to suppress output
         )
         
+        Write-Debug-Message "[DEBUG] SSH key generation arguments: $($sshKeyGenArgs -join ' ')"
+        
         # Execute ssh-keygen with proper argument handling
         try {
+            Write-Debug-Message "[DEBUG] Executing ssh-keygen command..."
             & ssh-keygen @sshKeyGenArgs
             $keyGenResult = $LASTEXITCODE
+            Write-Debug-Message "[DEBUG] ssh-keygen exit code: $keyGenResult"
         } catch {
+            Write-Debug-Message "[DEBUG] ssh-keygen execution exception: $($_.Exception.Message)"
             Write-Host ""
             Write-Host "  [ERROR] ssh-keygen execution failed: $($_.Exception.Message)" -ForegroundColor Red
             Write-Host ""
@@ -527,13 +623,19 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         }
         
         # Check if SSH key generation was successful
+        Write-Debug-Message "[DEBUG] Validating SSH key generation results..."
+        $publicKeyGenerated = Test-Path "$HOME\.ssh\id_ed25519_$USERNAME.pub"
+        Write-Debug-Message "[DEBUG] Public key file exists after generation: $publicKeyGenerated"
+        
         if ($keyGenResult -eq 0 -and (Test-Path "$HOME\.ssh\id_ed25519_$USERNAME.pub")) {
+            Write-Debug-Message "[DEBUG] SSH key generation successful"
             Write-Host ""
             Write-Host "[SUCCESS] New SSH key generated successfully!" -ForegroundColor Green
             Write-Host "  Private key: $HOME\.ssh\id_ed25519_$USERNAME"
             Write-Host "  Public key: $HOME\.ssh\id_ed25519_$USERNAME.pub"
             Write-Host ""
         } else {
+            Write-Debug-Message "[DEBUG] SSH key generation failed - Exit code: $keyGenResult, Public key exists: $(Test-Path "$HOME\.ssh\id_ed25519_$USERNAME.pub")"
             Write-Host ""
             Write-Host "[ERROR] Failed to generate new SSH key!" -ForegroundColor Red
             Write-Host "  Exit code: $keyGenResult"
@@ -721,26 +823,42 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     
     # Start and configure ssh-agent
     try {
+        Write-Debug-Message "[DEBUG] Starting SSH agent configuration..."
         Write-Host ""
         Write-Host "[INFO] Configuring SSH agent..." -ForegroundColor Cyan
         Write-Host ""
         
         # Start ssh-agent service if not running
+        Write-Debug-Message "[DEBUG] Checking SSH agent service status..."
         $sshAgentService = Get-Service ssh-agent -ErrorAction SilentlyContinue
+        
+        if ($sshAgentService) {
+            Write-Debug-Message "[DEBUG] SSH agent service found, status: $($sshAgentService.Status)"
+        } else {
+            Write-Debug-Message "[DEBUG] SSH agent service not found"
+        }
+        
         if ($sshAgentService.Status -ne 'Running') {
+            Write-Debug-Message "[DEBUG] Starting SSH agent service..."
             Set-Service ssh-agent -StartupType Automatic
             Start-Service ssh-agent
             Write-Host ""
             Write-Host "  SSH agent service started"
+            Write-Debug-Message "[DEBUG] SSH agent service started successfully"
+        } else {
+            Write-Debug-Message "[DEBUG] SSH agent service already running"
         }
         
         # Add key to ssh-agent
+        Write-Debug-Message "[DEBUG] Adding SSH key to agent: $sshKeyPath"
         ssh-add $sshKeyPath
         Write-Host ""
         Write-Host "  SSH key added to agent"
         Write-Host ""
+        Write-Debug-Message "[DEBUG] SSH key successfully added to agent"
         
     } catch {
+        Write-Debug-Message "[DEBUG] SSH agent configuration failed: $($_.Exception.Message)"
         Write-Host ""
         Write-Host "[WARNING] Could not configure SSH agent. Key may still work for GitHub." -ForegroundColor Yellow
         Write-Host ""
@@ -757,9 +875,13 @@ Write-Host ""
 Write-Host "Please choose your container deployment location..."
 Write-Host ""
 
+Write-Debug-Message "[DEBUG] STEP 3: Starting container location selection..."
+
 #----------------------------------------------#
 #   STEP 3: PROMPT LOCAL / REMOTE CONNECTION   #
 #----------------------------------------------#
+
+Write-Debug-Message "[DEBUG] Creating container location selection form..."
 
 # Create a new form for local/remote selection
 $formConnection = New-Object System.Windows.Forms.Form -Property @{ 
@@ -811,7 +933,9 @@ $formConnection.Controls.Add($buttonRemote)
 
 # Add click handlers for the buttons
 $buttonLocal.Add_Click({
+    Write-Debug-Message "[DEBUG] User selected local container option"
     $script:DEBUG_MODE = $checkBoxDebug.Checked
+    Write-Debug-Message "[DEBUG] Debug mode setting: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })"
     Write-Host "[INFO] Debug mode: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "================================================"
@@ -830,7 +954,9 @@ $buttonLocal.Add_Click({
 #----------------------------------------------------------------#
 
 $buttonRemote.Add_Click({
+    Write-Debug-Message "[DEBUG] User selected remote container option"
     $script:DEBUG_MODE = $checkBoxDebug.Checked
+    Write-Debug-Message "[DEBUG] Debug mode setting: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })"
     Write-Host "[INFO] Debug mode: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "================================================"
@@ -844,8 +970,11 @@ $buttonRemote.Add_Click({
     Write-Host "[INFO] Testing SSH connection to remote workstation..." -ForegroundColor Cyan
     Write-Host ""
     
+    Write-Debug-Message "[DEBUG] STEP 4.1.1: Starting SSH connection establishment and testing..."
+    
     # Define remote host (update this IP address to match your workstation)
     $remoteHost = "php-workstation@10.162.192.90"  #TODO: Implement individual users!
+    Write-Debug-Message "[DEBUG] Target remote host: $remoteHost"
  
     # Test SSH connection with detailed feedback
     try {
@@ -860,9 +989,12 @@ $buttonRemote.Add_Click({
         
         # Use specific SSH key to avoid "Too many authentication failures"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        Write-Debug-Message "[DEBUG] Using SSH key for authentication: $sshKeyPath"
 
         # Validate that SSH key exists before attempting to use it
+        Write-Debug-Message "[DEBUG] Validating SSH key existence..."
         if (-not (Test-Path $sshKeyPath)) {
+            Write-Debug-Message "[DEBUG] SSH key validation failed - file not found"
             Write-Host ""
             Write-Host "  [ERROR] SSH key not found: $sshKeyPath" -ForegroundColor Red
             Write-Host "  Please ensure SSH key generation completed successfully" -ForegroundColor Red
@@ -872,6 +1004,8 @@ $buttonRemote.Add_Click({
         }
         
         Write-Host "  Using SSH key: $sshKeyPath" -ForegroundColor Cyan
+        
+        Write-Debug-Message "[DEBUG] Starting SSH connection test with timeout..."
         
         # Use PowerShell job with timeout for SSH connection test
         $sshTestJob = Start-Job -ScriptBlock {
@@ -883,18 +1017,24 @@ $buttonRemote.Add_Click({
             }
         } -ArgumentList $sshKeyPath, $remoteHost
         
+        Write-Debug-Message "[DEBUG] SSH test job started, waiting for completion (15s timeout)..."
+        
         if (Wait-Job $sshTestJob -Timeout 15) {
+            Write-Debug-Message "[DEBUG] SSH test job completed within timeout"
             $jobResult = Receive-Job $sshTestJob
             Remove-Job $sshTestJob
             $sshTestResult = $jobResult.Output
             $SSHEXITCODE = $jobResult.ExitCode
+            Write-Debug-Message "[DEBUG] SSH test result: Exit code $SSHEXITCODE, Output: '$sshTestResult'"
         } else {
+            Write-Debug-Message "[DEBUG] SSH test job timed out, forcing cleanup"
             Remove-Job $sshTestJob -Force
             $sshTestResult = "SSH connection test timed out after 15 seconds"
             $SSHEXITCODE = 1
         }
 
         if ($SSHEXITCODE -eq 0 -and $sshTestResult -match "SSH connection successful" -and $sshTestResult -notmatch "Permission denied") {
+            Write-Debug-Message "[DEBUG] SSH key authentication successful"
             Write-Host ""
             Write-Host "  [SUCCESS] SSH key authentication successful!" -ForegroundColor Green
             Write-Host "  Response: $sshTestResult"
@@ -906,6 +1046,8 @@ $buttonRemote.Add_Click({
             $script:REMOTE_HOST_IP = $remoteIP
             
         } else {
+            Write-Debug-Message "[DEBUG] SSH key authentication failed, password authentication required"
+            Write-Debug-Message "[DEBUG] SSH test details - Exit code: $SSHEXITCODE, Output: '$sshTestResult'"
             Write-Host ""
             Write-Host "  [INFO] SSH key authentication failed - password authentication required" -ForegroundColor Cyan
             Write-Host "  Response: $sshTestResult"
@@ -913,6 +1055,7 @@ $buttonRemote.Add_Click({
             Write-Host ""
             
             # Prompt user for remote host password #TODO: Change based on individual users!
+            Write-Debug-Message "[DEBUG] Creating password input form for remote host authentication"
             $formPassword = New-Object System.Windows.Forms.Form -Property @{ 
                 Text = 'Remote Host Password - IMPACT NCD Germany'
                 Size = New-Object System.Drawing.Size(450,180)
@@ -976,10 +1119,14 @@ $buttonRemote.Add_Click({
             $textRemotePassword.Select()
 
             # Show the password dialog
+            Write-Debug-Message "[DEBUG] Displaying password input dialog to user"
             $passwordResult = $formPassword.ShowDialog()
+            Write-Debug-Message "[DEBUG] Password dialog result: $passwordResult"
             
             if ($passwordResult -eq [System.Windows.Forms.DialogResult]::OK) {
+                Write-Debug-Message "[DEBUG] Password provided by user, processing credentials..."
                 # Secure password handling: Convert to SecureString immediately
+                Write-Debug-Message "[DEBUG] Converting password to secure string for safe handling"
                 Write-Host ""
                 Write-Host "  [INFO] Password provided, securing credentials..." -ForegroundColor Cyan
                 Write-Host ""
@@ -987,15 +1134,20 @@ $buttonRemote.Add_Click({
                                 
                 # Create credential object for secure handling
                 $hostParts = $remoteHost -split "@"
+                Write-Debug-Message "[DEBUG] Parsing remote host string: $remoteHost"
                 if ($hostParts.Count -eq 2) {
                     $sshUser = $hostParts[0]
                     $sshHost = $hostParts[1]
+                    Write-Debug-Message "[DEBUG] Parsed SSH user: $sshUser, SSH host: $sshHost"
                 } else {
                     $sshUser = $env:USERNAME
                     $sshHost = $remoteHost
+                    Write-Debug-Message "[DEBUG] Using default user: $sshUser, host: $sshHost"
                 }
                 
                 $remoteCredential = New-Object System.Management.Automation.PSCredential($sshUser, $securePassword)
+                
+                Write-Debug-Message "[DEBUG] Credential object created, clearing password from form"
                 
                 # Clear the plain text password from the textbox and form
                 $textRemotePassword.Text = ""
@@ -1003,6 +1155,7 @@ $buttonRemote.Add_Click({
                 
                 # Dispose of the password form securely
                 $formPassword.Dispose()
+                Write-Debug-Message "[DEBUG] Password form disposed securely"
                 
                 Write-Host ""
                 Write-Host "  [INFO] Credentials secured, testing connection..." -ForegroundColor Cyan
@@ -1237,16 +1390,16 @@ $buttonRemote.Add_Click({
                                     $keyContent = Get-Content $tempKeyFile -Raw
                                     $keyContent = $keyContent.Trim() -replace "'", "'\''"  # Escape single quotes
                                     
-                                    Write-Debug-Message "  [DEBUG] Key content length: $($keyContent.Length) characters" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Remote destination: $remoteTemp" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Key content length: $($keyContent.Length) characters"
+                                    Write-Debug-Message "  [DEBUG] Remote destination: $remoteTemp"
                                     
                                     $createFileCommand = "echo '$keyContent' > $remoteTemp && echo 'FILE_CREATED' && ls -la $remoteTemp"
-                                    Write-Debug-Message "  [DEBUG] Executing SSH command..." -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Executing SSH command..."
                                     
                                     $createResult = Invoke-SSHCommand -SessionId $sessionId -Command $createFileCommand -ErrorAction Stop
                                     
-                                    Write-Debug-Message "  [DEBUG] SSH command exit status: $($createResult.ExitStatus)" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] SSH command output: '$($createResult.Output)'" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] SSH command exit status: $($createResult.ExitStatus)"
+                                    Write-Debug-Message "  [DEBUG] SSH command output: '$($createResult.Output)'"
                                     
                                     if ($createResult.Output -match "FILE_CREATED") {
                                         Write-Host "  [SUCCESS] Key file created via SSH command" -ForegroundColor Green
@@ -1254,11 +1407,11 @@ $buttonRemote.Add_Click({
                                         throw "SSH file creation failed: $($createResult.Output)"
                                     }
                                     
-                                    Write-Debug-Message "  [DEBUG] File upload successful, proceeding with key validation on remote..." -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] File upload successful, proceeding with key validation on remote..."
                                     
                                     # Compose remote script to install the key properly
-                                    Write-Debug-Message "  [DEBUG] Preparing remote installation script..." -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Using USERNAME from script: $USERNAME" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Preparing remote installation script..."
+                                    Write-Debug-Message "  [DEBUG] Using USERNAME from script: $USERNAME"
                                     
                                     # Create the script with proper line endings and variable substitution
                                     $remoteScriptContent = @"
@@ -1379,30 +1532,30 @@ echo "SCRIPT_END"
                                     # Convert Windows line endings to Unix line endings
                                     $remoteScript = $remoteScriptContent -replace "`r`n", "`n" -replace "`r", "`n"
                                     
-                                    Write-Debug-Message "  [DEBUG] Executing remote installation script..." -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Script length: $($remoteScript.Length) characters" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Session ID: $sessionId" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Executing remote installation script..."
+                                    Write-Debug-Message "  [DEBUG] Script length: $($remoteScript.Length) characters"
+                                    Write-Debug-Message "  [DEBUG] Session ID: $sessionId"
                                     
                                     # Execute the remote script
                                     $scriptResult = Invoke-SSHCommand -SessionId $sessionId -Command $remoteScript -ErrorAction Stop
                                     
-                                    Write-Debug-Message "  [DEBUG] Remote script execution completed" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Remote script exit status: $($scriptResult.ExitStatus)" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Output length: $($scriptResult.Output.Length) characters" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Error length: $($scriptResult.Error.Length) characters" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] Remote script output:" -ForegroundColor Magenta
-                                    Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Remote script execution completed"
+                                    Write-Debug-Message "  [DEBUG] Remote script exit status: $($scriptResult.ExitStatus)"
+                                    Write-Debug-Message "  [DEBUG] Output length: $($scriptResult.Output.Length) characters"
+                                    Write-Debug-Message "  [DEBUG] Error length: $($scriptResult.Error.Length) characters"
+                                    Write-Debug-Message "  [DEBUG] Remote script output:"
+                                    Write-Debug-Message "  [DEBUG] ==================="
                                     if ($scriptResult.Output) {
-                                        Write-Debug-Message "$($scriptResult.Output)" -ForegroundColor Magenta
+                                        Write-Debug-Message "$($scriptResult.Output)"
                                     } else {
-                                        Write-Debug-Message "  [DEBUG] NO OUTPUT RECEIVED" -ForegroundColor Red
+                                        Write-Debug-Message "  [DEBUG] NO OUTPUT RECEIVED"
                                     }
-                                    Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] ==================="
                                     if ($scriptResult.Error) {
-                                        Write-Debug-Message "  [DEBUG] Remote script errors:" -ForegroundColor Red
-                                        Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Red
-                                        Write-Debug-Message "$($scriptResult.Error)" -ForegroundColor Red
-                                        Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Red
+                                        Write-Debug-Message "  [DEBUG] Remote script errors:"
+                                        Write-Debug-Message "  [DEBUG] ==================="
+                                        Write-Debug-Message "$($scriptResult.Error)"
+                                        Write-Debug-Message "  [DEBUG] ==================="
                                     }
                                     
                                     if ($scriptResult.Output -match "SSH_KEY_COPIED") {
@@ -1414,7 +1567,7 @@ echo "SCRIPT_END"
                                         $keyCopySuccess = $true
                                     } else {
                                         Write-Host "  [WARNING] Posh-SSH key copy may have failed: $($scriptResult.Output)" -ForegroundColor Yellow
-                                        Write-Debug-Message "  [DEBUG] Expected 'SSH_KEY_COPIED' marker not found in output" -ForegroundColor Magenta
+                                        Write-Debug-Message "  [DEBUG] Expected 'SSH_KEY_COPIED' marker not found in output"
                                     }
                                     
                                 } finally {
@@ -1805,10 +1958,13 @@ echo "SCRIPT_END"
 })
 
 # Show the connection selection dialog
+Write-Debug-Message "[DEBUG] Displaying container location selection dialog"
 $connectionResult = $formConnection.ShowDialog()
+Write-Debug-Message "[DEBUG] Container location dialog result: $connectionResult"
 
 # Store the selection for later use
 if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+    Write-Debug-Message "[DEBUG] Processing local container selection"
     $CONTAINER_LOCATION = "LOCAL"
     Write-Host ""
     Write-Host "[SUCCESS] Container location configured" -ForegroundColor Green
@@ -1818,6 +1974,7 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     Write-Host "========================================="
     Write-Host ""
 } elseif ($connectionResult -eq [System.Windows.Forms.DialogResult]::No -and $script:REMOTE_HOST_IP) {
+    Write-Debug-Message "[DEBUG] Processing remote container selection for IP: $($script:REMOTE_HOST_IP)"
     $CONTAINER_LOCATION = "REMOTE@$($script:REMOTE_HOST_IP)"
     Write-Host "[SUCCESS] Container location configured" -ForegroundColor Green
     Write-Host "  Location: REMOTE"
@@ -1828,11 +1985,16 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     # Set up global SSH environment for all remote Docker operations
     $script:sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
     $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+    Write-Debug-Message "[DEBUG] Configuring global SSH environment for Docker operations"
+    Write-Debug-Message "[DEBUG] SSH Key Path: $script:sshKeyPath"
+    Write-Debug-Message "[DEBUG] SSH Options: $env:DOCKER_SSH_OPTS"
     Write-Host "[INFO] Global SSH environment configured for Docker operations" -ForegroundColor Cyan
     Write-Host "  SSH Key: $script:sshKeyPath" -ForegroundColor Cyan
     Write-Host "  SSH Options: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
     Write-Host ""
 } else {
+    Write-Debug-Message "[DEBUG] Container location configuration failed"
+    Write-Debug-Message "[DEBUG] Connection result: $connectionResult, Remote IP: $($script:REMOTE_HOST_IP)"
     Write-Host ""
     Write-Host "[ERROR] Configuration failed" -ForegroundColor Red
     Write-Host "  Reason: Remote connection failed or user cancelled"
@@ -1845,7 +2007,10 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
 #   STEP 4.1.2: IF REMOTE - READ REPO LIST   #
 #--------------------------------------------#
 
+Write-Debug-Message "[DEBUG] STEP 4.1.2: Starting remote repository scanning..."
+
 if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
+    Write-Debug-Message "[DEBUG] Container location confirmed as remote: $CONTAINER_LOCATION"
     Write-Host ""
     Write-Host "========================================="
     Write-Host "    SCANNING REMOTE REPOSITORIES"
@@ -1856,9 +2021,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     
     # Define the base path on remote host where repositories are stored
     $remoteRepoPath = "/home/php-workstation/Schreibtisch/IMPACT/Models"
+    Write-Debug-Message "[DEBUG] Remote repository base path: $remoteRepoPath"
     #$remoteHost = "php_workstation@$($script:REMOTE_HOST_IP)" TODO: CHECK IF NEEDED
     
     try {
+        Write-Debug-Message "[DEBUG] Starting remote directory scan process"
         # Scan for subdirectories on remote host
         Write-Host ""
         Write-Host "    Scanning directory: $remoteRepoPath"
@@ -1866,10 +2033,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         Write-Host ""
         
         # Ensure we're using the correct remote host (the one we authenticated with)
+        Write-Debug-Message "[DEBUG] Validating remote host configuration..."
         if ([string]::IsNullOrEmpty($remoteHost)) {
+            Write-Debug-Message "[DEBUG] Remote host variable empty, reconstructing from stored IP"
             # Reconstruct the remote host from the IP we stored earlier
             if ($script:REMOTE_HOST_IP) {
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                Write-Debug-Message "[DEBUG] Reconstructed remote host: $remoteHost"
                 Write-Host ""
                 Write-Host "    [INFO] Reconstructed remote host: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
@@ -1881,14 +2051,17 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
         
         $scanCommand = "find '$remoteRepoPath' -maxdepth 1 -type d -not -path '$remoteRepoPath' -exec basename {} \;"
+        Write-Debug-Message "[DEBUG] Repository scan command: $scanCommand"
         
         # Use the authenticated SSH connection with specific key
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+        Write-Debug-Message "[DEBUG] Using SSH key for scan: $sshKeyPath"
         Write-Host ""
         Write-Host "    Executing: ssh with key $sshKeyPath to $remoteHost '$scanCommand'"
         Write-Host ""
         
         # Use job with timeout for repository scanning to prevent hanging
+        Write-Debug-Message "[DEBUG] Starting repository scan job with 20-second timeout"
         $scanJob = Start-Job -ScriptBlock {
             param($sshKeyPath, $remoteHost, $scanCommand)
             $output = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $scanCommand 2>&1
@@ -1898,14 +2071,19 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             }
         } -ArgumentList $sshKeyPath, $remoteHost, $scanCommand
         
+        Write-Debug-Message "[DEBUG] Scan job started, waiting for completion..."
         $scanResult = Wait-Job $scanJob -Timeout 20
         
         if ($scanResult) {
+            Write-Debug-Message "[DEBUG] Scan job completed successfully, retrieving results"
             $scanData = Receive-Job $scanJob
             $availableFolders = $scanData.Output
             $scanExitCode = $scanData.ExitCode
+            Write-Debug-Message "[DEBUG] Scan exit code: $scanExitCode"
+            Write-Debug-Message "[DEBUG] Raw scan output: $availableFolders"
             Remove-Job $scanJob
         } else {
+            Write-Debug-Message "[DEBUG] Scan job timed out, cleaning up"
             Write-Host "    [ERROR] Repository scan timed out" -ForegroundColor Red
             Stop-Job $scanJob -ErrorAction SilentlyContinue
             Remove-Job $scanJob -ErrorAction SilentlyContinue
@@ -1915,6 +2093,8 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         }
         
         if ($scanExitCode -ne 0) {
+            Write-Debug-Message "[DEBUG] Repository scan failed with exit code: $scanExitCode"
+            Write-Debug-Message "[DEBUG] Scan error output: $availableFolders"
             Write-Host ""
             Write-Host "    [ERROR] Could not scan remote directory" -ForegroundColor Red
             Write-Host "    Command output: $availableFolders"
@@ -1925,8 +2105,11 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         # Convert output to array and filter out empty lines
         $folderList = $availableFolders -split "`n" | Where-Object { $_.Trim() -ne "" }
+        Write-Debug-Message "[DEBUG] Processed folder list: Found $($folderList.Count) folders"
+        Write-Debug-Message "[DEBUG] Folder list contents: $($folderList -join ', ')"
         
         if ($folderList.Count -eq 0) {
+            Write-Debug-Message "[DEBUG] No repositories found in remote directory"
             Write-Host ""
             Write-Host "    [ERROR] No subdirectories (and thus no simulation models) found in:" -ForegroundColor Red
             Write-Host "    $remoteRepoPath"
@@ -1935,6 +2118,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             exit 1
         }
         
+        Write-Debug-Message "[DEBUG] Repository scan completed successfully: $($folderList.Count) repositories found"
         Write-Host ""
         Write-Host "    [SUCCESS] Found $($folderList.Count) repositories:" -ForegroundColor Green
         Write-Host ""
@@ -1946,7 +2130,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     } catch {
         Write-Host ""
         Write-Host "    [ERROR] Unexpected error while scanning remote repositories" -ForegroundColor Red
-        Write-Debug-Message "    Error details: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Debug-Message "    Error details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Unexpected error while scanning remote for simulation models and repositories.`n`nError: $($_.Exception.Message)", "Scan Error", "OK", "Error")
         exit 1
@@ -1956,6 +2140,8 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
 #   STEP 4.1.3: IF REMOTE - PROMPT REPO SELECTION   #
 #---------------------------------------------------#
 
+    Write-Debug-Message "[DEBUG] STEP 4.1.3: Starting repository selection process..."
+    
     Write-Host ""
     Write-Host "========================================="
     Write-Host "    REPOSITORY SELECTION"
@@ -1963,6 +2149,8 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host ""
     Write-Host "    [INFO] Creating repository selection dialog..." -ForegroundColor Cyan
     Write-Host ""
+    
+    Write-Debug-Message "[DEBUG] Creating repository selection form with $($folderList.Count) options"
     
     # Create repository selection form
     $formRepoSelection = New-Object System.Windows.Forms.Form -Property @{ 
@@ -1991,13 +2179,16 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     }
     
     # Add folders to the list
+    Write-Debug-Message "[DEBUG] Populating repository list with folders..."
     foreach ($folder in $folderList) {
         $listBoxRepos.Items.Add($folder) | Out-Null
+        Write-Debug-Message "[DEBUG] Added repository: $folder"
     }
     
     # Select first item by default
     if ($listBoxRepos.Items.Count -gt 0) {
         $listBoxRepos.SelectedIndex = 0
+        Write-Debug-Message "[DEBUG] Default selection set to: $($listBoxRepos.Items[0])"
     }
     
     $formRepoSelection.Controls.Add($listBoxRepos)
@@ -2035,10 +2226,13 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     })
 
     # Show the repository selection dialog
+    Write-Debug-Message "[DEBUG] Displaying repository selection dialog to user"
     $repoSelectionResult = $formRepoSelection.ShowDialog()
+    Write-Debug-Message "[DEBUG] Repository selection dialog result: $repoSelectionResult"
 
     # Process the selection
     if ($repoSelectionResult -eq [System.Windows.Forms.DialogResult]::OK) {
+        Write-Debug-Message "[DEBUG] User selected repository: $($script:SELECTED_REPO)"
         Write-Host ""
         Write-Host "    [SUCCESS] Selected repository: $($script:SELECTED_REPO)" -ForegroundColor Green
         Write-Host "    Repository path: $remoteRepoPath/$($script:SELECTED_REPO)"
@@ -2393,7 +2587,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     } catch {
         Write-Host ""
         Write-Host "    [ERROR] Could not check remote Docker availability" -ForegroundColor Red
-        Write-Debug-Message "    Error details: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Debug-Message "    Error details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Could not verify remote Docker availability.`n`nError: $($_.Exception.Message)`n`nPlease ensure the remote host is accessible and Docker is installed.", "Remote Docker Check Failed", "OK", "Error")
         exit 1
@@ -2661,7 +2855,7 @@ Host docker-$sshHostname
         Write-Host "    [INFO] Docker context is working correctly" -ForegroundColor Cyan
     } else {
         Write-Host "    [WARNING] Docker context authentication failed (this is a known limitation)" -ForegroundColor Yellow
-        Write-Debug-Message "    Error details: $dockerTestOutput" -ForegroundColor Yellow
+        Write-Debug-Message "    Error details: $dockerTestOutput"
         Write-Host "" 
         Write-Host "    [INFO] Docker contexts have limitations with SSH key authentication" -ForegroundColor Cyan
         Write-Host "    [INFO] Direct SSH commands work fine, container operations will use direct SSH" -ForegroundColor Cyan
@@ -2981,7 +3175,7 @@ Host docker-$sshHostname
         }
     } catch {
         Write-Host "    [ERROR] Could not check Docker availability" -ForegroundColor Red
-        Write-Debug-Message "    Error details: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Debug-Message "    Error details: $($_.Exception.Message)"
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Could not verify Docker availability.`n`nPlease ensure Docker Desktop is installed and running.", "Docker Check Failed", "OK", "Error")
         exit 1
@@ -3071,16 +3265,23 @@ Host docker-$sshHostname
 
 # 0: Helper function to set up SSH environment for remote Docker operations
 function Set-DockerSSHEnvironment {
+    Write-Debug-Message "[DEBUG] Setting up Docker SSH environment..."
     if ($CONTAINER_LOCATION -like "REMOTE@*" -and (-not $env:DOCKER_SSH_OPTS -or [string]::IsNullOrEmpty($env:DOCKER_SSH_OPTS))) {
+        Write-Debug-Message "[DEBUG] Remote container detected, SSH environment needs setup"
         if ($script:sshKeyPath) {
             $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+            Write-Debug-Message "[DEBUG] SSH environment restored from cached key path: $script:sshKeyPath"
             Write-Host "[INFO] Restored SSH environment for Docker operations: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
         } else {
             # Fallback - reconstruct from USERNAME
             $script:sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+            Write-Debug-Message "[DEBUG] SSH environment reconstructed from USERNAME: $USERNAME"
+            Write-Debug-Message "[DEBUG] Reconstructed key path: $script:sshKeyPath"
             Write-Host "[INFO] Reconstructed SSH environment for Docker operations: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
         }
+    } else {
+        Write-Debug-Message "[DEBUG] SSH environment already configured or not needed (local container)"
     }
 }
 
@@ -3091,9 +3292,15 @@ function Test-RemoteSSHKeyFiles {
         [string]$Username
     )
     
+    Write-Debug-Message "[DEBUG] Testing remote SSH key files for user: $Username on host: $RemoteHost"
+    
     $remoteSSHKeyPath = "/home/php-workstation/.ssh/id_ed25519_${Username}"
     $remoteKnownHostsPath = "/home/php-workstation/.ssh/known_hosts"
     $localSSHKeyPath = "$HOME\.ssh\id_ed25519_$Username"
+    
+    Write-Debug-Message "[DEBUG] Remote private key path: $remoteSSHKeyPath"
+    Write-Debug-Message "[DEBUG] Remote known_hosts path: $remoteKnownHostsPath"
+    Write-Debug-Message "[DEBUG] Local SSH key path: $localSSHKeyPath"
     
     $results = @{
         PrivateKeyExists = $false
@@ -3102,10 +3309,14 @@ function Test-RemoteSSHKeyFiles {
     }
     
     try {
+        Write-Debug-Message "[DEBUG] Starting remote SSH key file verification..."
+        
         # Check if private key exists on remote with timeout protection
         $checkPrivateKeyCommand = "test -f '$remoteSSHKeyPath' && echo PRIVATE_KEY_EXISTS || echo PRIVATE_KEY_MISSING"
+        Write-Debug-Message "[DEBUG] Private key check command: $checkPrivateKeyCommand"
         
         # Use PowerShell job with timeout for SSH private key check
+        Write-Debug-Message "[DEBUG] Starting private key check job..."
         $privateKeyJob = Start-Job -ScriptBlock {
             param($localSSHKeyPath, $RemoteHost, $checkPrivateKeyCommand)
             & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkPrivateKeyCommand 2>&1
@@ -3114,21 +3325,27 @@ function Test-RemoteSSHKeyFiles {
         if (Wait-Job $privateKeyJob -Timeout 15) {
             $privateKeyCheckResult = Receive-Job $privateKeyJob
             Remove-Job $privateKeyJob
+            Write-Debug-Message "[DEBUG] Private key check result: $privateKeyCheckResult"
             
             if ($privateKeyCheckResult -match "PRIVATE_KEY_EXISTS") {
                 $results.PrivateKeyExists = $true
+                Write-Debug-Message "[DEBUG] Private key found on remote system"
             } else {
+                Write-Debug-Message "[DEBUG] Private key not found on remote system"
                 $results.ErrorDetails += "Private key not found at: $remoteSSHKeyPath (Result: $privateKeyCheckResult)"
             }
         } else {
+            Write-Debug-Message "[DEBUG] Private key check timed out"
             Remove-Job $privateKeyJob -Force
             $results.ErrorDetails += "Private key check timed out after 15 seconds"
         }
         
         # Check if known_hosts exists on remote with timeout protection
         $checkKnownHostsCommand = "test -f '$remoteKnownHostsPath' && echo KNOWN_HOSTS_EXISTS || echo KNOWN_HOSTS_MISSING"
+        Write-Debug-Message "[DEBUG] Known_hosts check command: $checkKnownHostsCommand"
         
         # Use PowerShell job with timeout for SSH known_hosts check
+        Write-Debug-Message "[DEBUG] Starting known_hosts check job..."
         $knownHostsJob = Start-Job -ScriptBlock {
             param($localSSHKeyPath, $RemoteHost, $checkKnownHostsCommand)
             & ssh -i $localSSHKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $RemoteHost $checkKnownHostsCommand 2>&1
@@ -3137,20 +3354,30 @@ function Test-RemoteSSHKeyFiles {
         if (Wait-Job $knownHostsJob -Timeout 15) {
             $knownHostsCheckResult = Receive-Job $knownHostsJob
             Remove-Job $knownHostsJob
+            Write-Debug-Message "[DEBUG] Known_hosts check result: $knownHostsCheckResult"
             
             if ($knownHostsCheckResult -match "KNOWN_HOSTS_EXISTS") {
                 $results.KnownHostsExists = $true
+                Write-Debug-Message "[DEBUG] Known_hosts file found on remote system"
             } else {
+                Write-Debug-Message "[DEBUG] Known_hosts file not found on remote system"
                 $results.ErrorDetails += "Known_hosts file not found at: $remoteKnownHostsPath (Result: $knownHostsCheckResult)"
             }
         } else {
+            Write-Debug-Message "[DEBUG] Known_hosts check timed out"
             Remove-Job $knownHostsJob -Force
             $results.ErrorDetails += "Known_hosts check timed out after 15 seconds"
         }
         
     } catch {
+        Write-Debug-Message "[DEBUG] SSH key file verification failed with exception: $($_.Exception.Message)"
         $results.ErrorDetails += "SSH connection failed: $($_.Exception.Message)"
     }
+    
+    Write-Debug-Message "[DEBUG] SSH key file verification completed"
+    Write-Debug-Message "[DEBUG] Private key exists: $($results.PrivateKeyExists)"
+    Write-Debug-Message "[DEBUG] Known_hosts exists: $($results.KnownHostsExists)"
+    Write-Debug-Message "[DEBUG] Error count: $($results.ErrorDetails.Count)"
     
     return $results
 }
@@ -3295,7 +3522,7 @@ function Test-AndCreateDirectory {
                 return $true
             } else {
                 Write-Host "[ERROR] Failed to create remote $PathKey directory: $remotePath" -ForegroundColor Red
-                Write-Debug-Message "[ERROR] Create error details: $createResult" -ForegroundColor Red
+                Write-Debug-Message "[ERROR] Create error details: $createResult"
                 return $false
             }
         } elseif ($dirCheck -match "EXISTS") {
@@ -3325,7 +3552,7 @@ function Test-AndCreateDirectory {
             }
         } else {
             Write-Host "[ERROR] Could not check remote $PathKey directory: $remotePath" -ForegroundColor Red
-            Write-Debug-Message "[ERROR] SSH check error details: $dirCheck" -ForegroundColor Red
+            Write-Debug-Message "[ERROR] SSH check error details: $dirCheck"
             return $false
         }
     } else {
@@ -4101,8 +4328,10 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
 
 # Set repository/model and user-specific name for Docker container
 $CONTAINER_NAME = "$($script:SELECTED_REPO)_$USERNAME"
+Write-Debug-Message "[DEBUG] Container name set to: $CONTAINER_NAME"
 
 # Check for existing containers with the username
+Write-Debug-Message "[DEBUG] STEP 5: Starting container status check for user: $USERNAME"
 Write-Host ""
 Write-Host "================================================"
 Write-Host "  STEP 5: Container Status Check"
@@ -4113,26 +4342,38 @@ Write-Host "[INFO] Checking for existing containers for user: $USERNAME" -Foregr
 Write-Host ""
 
 try {
+    Write-Debug-Message "[DEBUG] Starting Docker container existence check..."
     # Ensure SSH environment is set for remote Docker operations
     Set-DockerSSHEnvironment
+    Write-Debug-Message "[DEBUG] SSH environment configured for Docker operations"
     
     # Get all containers (running and stopped) that contain the username
     if ($CONTAINER_LOCATION -eq "LOCAL") {
+        Write-Debug-Message "[DEBUG] Checking local Docker containers for user: $USERNAME"
         $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
     } else {
+        Write-Debug-Message "[DEBUG] Checking remote Docker containers using context: $script:REMOTE_CONTEXT_NAME"
         # For remote, use the context we set up
         $existingContainers = & docker --context $script:REMOTE_CONTEXT_NAME ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
     }
     
+    Write-Debug-Message "[DEBUG] Docker ps command exit code: $LASTEXITCODE"
+    
     if ($LASTEXITCODE -ne 0) {
+        Write-Debug-Message "[DEBUG] Docker ps command failed, containers may not be accessible"
         Write-Host "[WARNING] Could not check for existing containers. Consider checking manually in Docker Desktop!" -ForegroundColor Yellow
         Write-Host "  Continuing with container launch..."
         Write-Host ""
     } else {
+        Write-Debug-Message "[DEBUG] Docker ps command successful, processing container list"
+        Write-Debug-Message "[DEBUG] Raw Docker ps output: $existingContainers"
+        
         # Parse the output to find containers
         $containerList = $existingContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_ -notmatch "^NAMES" }
+        Write-Debug-Message "[DEBUG] Filtered container list count: $($containerList.Count)"
         
         if ($containerList.Count -gt 0) {
+            Write-Debug-Message "[DEBUG] Found existing containers for user: $USERNAME"
             Write-Host "[INFO] Found existing containers for user '$USERNAME':" -ForegroundColor Cyan
             Write-Host ""
             
@@ -5279,31 +5520,44 @@ RUN apk add --no-cache rsync
         # Fix volume ownership and pre-populate volumes:
         # Docker volumes are created with root ownership by default. We need to fix
         # the ownership before we can populate them as the calling user.
+        Write-Debug-Message "[DEBUG] Starting Docker volume ownership configuration..."
+        Write-Debug-Message "[DEBUG] Target User ID: $UserId, Group ID: $GroupId"
         Write-Host "[INFO] Setting correct ownership for Docker volumes..." -ForegroundColor Cyan
         if ($CONTAINER_LOCATION -eq "LOCAL") {
+            Write-Debug-Message "[DEBUG] Setting local Docker volume ownership..."
             & docker run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
             & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+            Write-Debug-Message "[DEBUG] Local volume ownership set successfully"
         } else {
+            Write-Debug-Message "[DEBUG] Setting remote Docker volume ownership using context: $script:REMOTE_CONTEXT_NAME"
             Set-DockerSSHEnvironment
             & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
             & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+            Write-Debug-Message "[DEBUG] Remote volume ownership set successfully"
         }
         Write-Host ""
 
         # Pre-populate volumes:
         # The output and synthpop volumes are populated from the respective source folders.
+        Write-Debug-Message "[DEBUG] Starting volume pre-population process..."
         
         # Use permission-tolerant copy with fallback logic
         if ($CONTAINER_LOCATION -eq "LOCAL") {
+            Write-Debug-Message "[DEBUG] Configuring local Docker paths..."
             # For local Windows, convert paths for Docker
             $dockerOutputSource = Convert-PathToDockerFormat -Path $outputDir
             $dockerSynthpopSource = Convert-PathToDockerFormat -Path $synthpopDir
             $script:REPO_PATH = $script:LOCAL_REPO_PATH
+            Write-Debug-Message "[DEBUG] Local Docker output source: $dockerOutputSource"
+            Write-Debug-Message "[DEBUG] Local Docker synthpop source: $dockerSynthpopSource"
         } else {
+            Write-Debug-Message "[DEBUG] Configuring remote Docker paths..."
             # For remote Linux, use paths directly
             $dockerOutputSource = $outputDir
             $dockerSynthpopSource = $synthpopDir
             $script:REPO_PATH = $script:REMOTE_REPO_PATH
+            Write-Debug-Message "[DEBUG] Remote Docker output source: $dockerOutputSource"
+            Write-Debug-Message "[DEBUG] Remote Docker synthpop source: $dockerSynthpopSource"
         }
 
         Write-Host "[INFO] Populating output volume from source directory..." -ForegroundColor Cyan
