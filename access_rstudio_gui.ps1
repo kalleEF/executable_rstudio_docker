@@ -33,7 +33,7 @@ $script:USE_DIRECT_SSH_FOR_DOCKER = $false  # Flag for Docker context SSH limita
 function Write-Debug-Message {
     param(
         [string]$Message,
-        [string]$ForegroundColor = "Yellow"
+        [string]$ForegroundColor = "Magenta"
     )
     if ($script:DEBUG_MODE) {
         Write-Host $Message -ForegroundColor $ForegroundColor
@@ -511,7 +511,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
             '-t', 'ed25519',
             '-C', "IMPACT_$USERNAME",
             '-f', "$HOME\.ssh\id_ed25519_$USERNAME",
-            '-N', '""',
+            '-N', '',
             '-q'  # Quiet mode to suppress output
         )
         
@@ -1039,7 +1039,7 @@ $buttonRemote.Add_Click({
                                     Import-Module Posh-SSH -Force -ErrorAction Stop
                                     
                                     # Verify that required cmdlets are available
-                                    $requiredCmdlets = @('New-SSHSession', 'New-SFTPSession', 'Set-SFTPItem', 'Invoke-SSHCommand', 'Remove-SSHSession', 'Remove-SFTPSession')
+                                    $requiredCmdlets = @('New-SSHSession', 'Invoke-SSHCommand', 'Remove-SSHSession')
                                     $missingCmdlets = @()
                                     
                                     foreach ($cmdlet in $requiredCmdlets) {
@@ -1108,7 +1108,7 @@ $buttonRemote.Add_Click({
                                         Start-Sleep -Milliseconds 500
                                         
                                         # Re-verify cmdlets are now available with more detailed checking
-                                        $requiredCmdlets = @('New-SSHSession', 'New-SFTPSession', 'Set-SFTPItem', 'Invoke-SSHCommand', 'Remove-SSHSession', 'Remove-SFTPSession')
+                                        $requiredCmdlets = @('New-SSHSession', 'Invoke-SSHCommand', 'Remove-SSHSession')
                                         $missingCmdlets = @()
                                         $availableCmdlets = @()
                                         
@@ -1193,16 +1193,7 @@ $buttonRemote.Add_Click({
                                         Write-Host "  Response: $($testCommand.Output.Trim())" -ForegroundColor Green
                                         
                                         # Session is working, continue with key installation logic here...
-                                        # Create SFTP session for file transfer
-                                        Write-Host "  Creating SFTP session..." -ForegroundColor Cyan
-                                        $sftpSession = New-SFTPSession -ComputerName $sshHost -Credential $remoteCredential -AcceptKey -ConnectionTimeout 15 -ErrorAction Stop
-                                        
-                                        if (-not $sftpSession) {
-                                            throw "SFTP session creation failed"
-                                        }
-                                        
-                                        $sftpSessionId = $sftpSession.SessionId
-                                        Write-Host "  [SUCCESS] SFTP session created (ID: $sftpSessionId)" -ForegroundColor Green
+                                        Write-Host "  SSH session is functional, proceeding with key installation..." -ForegroundColor Cyan
                                         
                                     } else {
                                         throw "Posh-SSH session created but test command failed. Output: '$($testCommand.Output)', Exit: $($testCommand.ExitStatus)"
@@ -1211,7 +1202,6 @@ $buttonRemote.Add_Click({
                                 } catch {
                                     # Clean up any sessions that were created
                                     try {
-                                        if ($sftpSessionId) { Remove-SFTPSession -SessionId $sftpSessionId -ErrorAction SilentlyContinue | Out-Null }
                                         if ($sessionId) { Remove-SSHSession -SessionId $sessionId -ErrorAction SilentlyContinue | Out-Null }
                                     } catch { }
                                     
@@ -1237,75 +1227,38 @@ $buttonRemote.Add_Click({
                                     
                                     Write-Host "  Key file size: $fileSize bytes" -ForegroundColor Cyan
                                     
-                                    # Initialize upload success flag
-                                    $uploadSuccess = $false
-                                    
-                                    # Upload key file with better error handling
-                                    Write-Host "  Preparing for file upload to /tmp..." -ForegroundColor Cyan
-                                    
                                     # Use simple filename in /tmp (most reliable location)
                                     $uniqueFileName = "ssh_key_temp_$(Get-Date -Format 'HHmmss').pub"
                                     $remoteTemp = "/tmp/$uniqueFileName"
                                     
-                                    Write-Host "  Uploading key file to: $remoteTemp" -ForegroundColor Cyan
+                                    Write-Host "  Creating key file on remote host via SSH command..." -ForegroundColor Cyan
                                     
-                                    try {
-                                        # Try uploading to /tmp first (most permissive location)
-                                        Write-Host "  [DEBUG] Attempting SFTP upload..." -ForegroundColor Magenta
-                                        Write-Host "  [DEBUG] Local file: $tempKeyFile" -ForegroundColor Magenta
-                                        Write-Host "  [DEBUG] Remote destination: $remoteTemp" -ForegroundColor Magenta
-                                        Write-Host "  [DEBUG] SFTP Session ID: $sftpSessionId" -ForegroundColor Magenta
-                                        
-                                        Set-SFTPItem -SessionId $sftpSessionId -Path $tempKeyFile -Destination $remoteTemp -ErrorAction Stop
-                                        Write-Host "  [SUCCESS] Key file uploaded to $remoteTemp" -ForegroundColor Green
-                                        $uploadSuccess = $true
-                                    } catch {
-                                        Write-Host "  [WARNING] SFTP upload failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                                        Write-Host "  [DEBUG] Full error details: $($_.Exception.ToString())" -ForegroundColor Magenta
-                                        
-                                        # Fallback: try using SSH to create the file directly
-                                        Write-Host "  Trying alternative method: creating file via SSH command..." -ForegroundColor Cyan
-                                        
-                                        try {
-                                            # Read the key content and create file directly via SSH
-                                            $keyContent = Get-Content $tempKeyFile -Raw
-                                            $keyContent = $keyContent.Trim() -replace "'", "'\''"  # Escape single quotes
-                                            
-                                            Write-Host "  [DEBUG] Key content length: $($keyContent.Length) characters" -ForegroundColor Magenta
-                                            Write-Host "  [DEBUG] First 50 chars of key: $($keyContent.Substring(0, [Math]::Min(50, $keyContent.Length)))" -ForegroundColor Magenta
-                                            Write-Host "  [DEBUG] Creating file command: echo '[KEY_CONTENT]' > $remoteTemp" -ForegroundColor Magenta
-                                            
-                                            $createFileCommand = "echo '$keyContent' > $remoteTemp && echo 'FILE_CREATED' && ls -la $remoteTemp"
-                                            Write-Host "  [DEBUG] Executing SSH command..." -ForegroundColor Magenta
-                                            
-                                            $createResult = Invoke-SSHCommand -SessionId $sessionId -Command $createFileCommand -ErrorAction Stop
-                                            
-                                            Write-Host "  [DEBUG] SSH command exit status: $($createResult.ExitStatus)" -ForegroundColor Magenta
-                                            Write-Host "  [DEBUG] SSH command output: '$($createResult.Output)'" -ForegroundColor Magenta
-                                            
-                                            if ($createResult.Output -match "FILE_CREATED") {
-                                                Write-Host "  [SUCCESS] Key file created via SSH command" -ForegroundColor Green
-                                                $uploadSuccess = $true
-                                            } else {
-                                                throw "SSH file creation failed: $($createResult.Output)"
-                                            }
-                                        } catch {
-                                            Write-Host "  [ERROR] Alternative method also failed: $($_.Exception.Message)" -ForegroundColor Red
-                                            Write-Host "  [DEBUG] Alternative method error details: $($_.Exception.ToString())" -ForegroundColor Magenta
-                                            throw "Failed to upload key file using both SFTP and SSH methods"
-                                        }
+                                    # Create the file directly via SSH command (more reliable than SFTP)
+                                    $keyContent = Get-Content $tempKeyFile -Raw
+                                    $keyContent = $keyContent.Trim() -replace "'", "'\''"  # Escape single quotes
+                                    
+                                    Write-Debug-Message "  [DEBUG] Key content length: $($keyContent.Length) characters" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Remote destination: $remoteTemp" -ForegroundColor Magenta
+                                    
+                                    $createFileCommand = "echo '$keyContent' > $remoteTemp && echo 'FILE_CREATED' && ls -la $remoteTemp"
+                                    Write-Debug-Message "  [DEBUG] Executing SSH command..." -ForegroundColor Magenta
+                                    
+                                    $createResult = Invoke-SSHCommand -SessionId $sessionId -Command $createFileCommand -ErrorAction Stop
+                                    
+                                    Write-Debug-Message "  [DEBUG] SSH command exit status: $($createResult.ExitStatus)" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] SSH command output: '$($createResult.Output)'" -ForegroundColor Magenta
+                                    
+                                    if ($createResult.Output -match "FILE_CREATED") {
+                                        Write-Host "  [SUCCESS] Key file created via SSH command" -ForegroundColor Green
+                                    } else {
+                                        throw "SSH file creation failed: $($createResult.Output)"
                                     }
                                     
-                                    # Only proceed if upload was successful
-                                    if (-not $uploadSuccess) {
-                                        throw "Failed to upload key file to remote host"
-                                    }
-                                    
-                                    Write-Host "  [DEBUG] File upload successful, proceeding with key validation on remote..." -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] File upload successful, proceeding with key validation on remote..." -ForegroundColor Magenta
                                     
                                     # Compose remote script to install the key properly
-                                    Write-Host "  [DEBUG] Preparing remote installation script..." -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Using USERNAME from script: $USERNAME" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Preparing remote installation script..." -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Using USERNAME from script: $USERNAME" -ForegroundColor Magenta
                                     
                                     # Create the script with proper line endings and variable substitution
                                     $remoteScriptContent = @"
@@ -1426,30 +1379,30 @@ echo "SCRIPT_END"
                                     # Convert Windows line endings to Unix line endings
                                     $remoteScript = $remoteScriptContent -replace "`r`n", "`n" -replace "`r", "`n"
                                     
-                                    Write-Host "  [DEBUG] Executing remote installation script..." -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Script length: $($remoteScript.Length) characters" -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Session ID: $sessionId" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Executing remote installation script..." -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Script length: $($remoteScript.Length) characters" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Session ID: $sessionId" -ForegroundColor Magenta
                                     
                                     # Execute the remote script
                                     $scriptResult = Invoke-SSHCommand -SessionId $sessionId -Command $remoteScript -ErrorAction Stop
                                     
-                                    Write-Host "  [DEBUG] Remote script execution completed" -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Remote script exit status: $($scriptResult.ExitStatus)" -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Output length: $($scriptResult.Output.Length) characters" -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Error length: $($scriptResult.Error.Length) characters" -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] Remote script output:" -ForegroundColor Magenta
-                                    Write-Host "  [DEBUG] ===================" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Remote script execution completed" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Remote script exit status: $($scriptResult.ExitStatus)" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Output length: $($scriptResult.Output.Length) characters" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Error length: $($scriptResult.Error.Length) characters" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] Remote script output:" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Magenta
                                     if ($scriptResult.Output) {
-                                        Write-Host "$($scriptResult.Output)" -ForegroundColor Magenta
+                                        Write-Debug-Message "$($scriptResult.Output)" -ForegroundColor Magenta
                                     } else {
-                                        Write-Host "  [DEBUG] NO OUTPUT RECEIVED" -ForegroundColor Red
+                                        Write-Debug-Message "  [DEBUG] NO OUTPUT RECEIVED" -ForegroundColor Red
                                     }
-                                    Write-Host "  [DEBUG] ===================" -ForegroundColor Magenta
+                                    Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Magenta
                                     if ($scriptResult.Error) {
-                                        Write-Host "  [DEBUG] Remote script errors:" -ForegroundColor Red
-                                        Write-Host "  [DEBUG] ===================" -ForegroundColor Red
-                                        Write-Host "$($scriptResult.Error)" -ForegroundColor Red
-                                        Write-Host "  [DEBUG] ===================" -ForegroundColor Red
+                                        Write-Debug-Message "  [DEBUG] Remote script errors:" -ForegroundColor Red
+                                        Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Red
+                                        Write-Debug-Message "$($scriptResult.Error)" -ForegroundColor Red
+                                        Write-Debug-Message "  [DEBUG] ===================" -ForegroundColor Red
                                     }
                                     
                                     if ($scriptResult.Output -match "SSH_KEY_COPIED") {
@@ -1461,14 +1414,13 @@ echo "SCRIPT_END"
                                         $keyCopySuccess = $true
                                     } else {
                                         Write-Host "  [WARNING] Posh-SSH key copy may have failed: $($scriptResult.Output)" -ForegroundColor Yellow
-                                        Write-Host "  [DEBUG] Expected 'SSH_KEY_COPIED' marker not found in output" -ForegroundColor Magenta
+                                        Write-Debug-Message "  [DEBUG] Expected 'SSH_KEY_COPIED' marker not found in output" -ForegroundColor Magenta
                                     }
                                     
                                 } finally {
                                     # Clean up temp file and sessions
                                     if (Test-Path $tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
                                     if ($sessionId) { Remove-SSHSession -SessionId $sessionId | Out-Null }
-                                    if ($sftpSessionId) { Remove-SFTPSession -SessionId $sftpSessionId | Out-Null }
                                 }
                                 
                             } else {
@@ -1994,7 +1946,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     } catch {
         Write-Host ""
         Write-Host "    [ERROR] Unexpected error while scanning remote repositories" -ForegroundColor Red
-        Write-Host "    Error details: $($_.Exception.Message)"
+        Write-Debug-Message "    Error details: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Unexpected error while scanning remote for simulation models and repositories.`n`nError: $($_.Exception.Message)", "Scan Error", "OK", "Error")
         exit 1
@@ -2441,7 +2393,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     } catch {
         Write-Host ""
         Write-Host "    [ERROR] Could not check remote Docker availability" -ForegroundColor Red
-        Write-Host "    Error details: $($_.Exception.Message)"
+        Write-Debug-Message "    Error details: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Could not verify remote Docker availability.`n`nError: $($_.Exception.Message)`n`nPlease ensure the remote host is accessible and Docker is installed.", "Remote Docker Check Failed", "OK", "Error")
         exit 1
@@ -2709,7 +2661,7 @@ Host docker-$sshHostname
         Write-Host "    [INFO] Docker context is working correctly" -ForegroundColor Cyan
     } else {
         Write-Host "    [WARNING] Docker context authentication failed (this is a known limitation)" -ForegroundColor Yellow
-        Write-Host "    Error details: $dockerTestOutput" -ForegroundColor Yellow
+        Write-Debug-Message "    Error details: $dockerTestOutput" -ForegroundColor Yellow
         Write-Host "" 
         Write-Host "    [INFO] Docker contexts have limitations with SSH key authentication" -ForegroundColor Cyan
         Write-Host "    [INFO] Direct SSH commands work fine, container operations will use direct SSH" -ForegroundColor Cyan
@@ -3029,7 +2981,7 @@ Host docker-$sshHostname
         }
     } catch {
         Write-Host "    [ERROR] Could not check Docker availability" -ForegroundColor Red
-        Write-Host "    Error details: $($_.Exception.Message)"
+        Write-Debug-Message "    Error details: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host ""
         [System.Windows.Forms.MessageBox]::Show("Could not verify Docker availability.`n`nPlease ensure Docker Desktop is installed and running.", "Docker Check Failed", "OK", "Error")
         exit 1
@@ -3343,7 +3295,7 @@ function Test-AndCreateDirectory {
                 return $true
             } else {
                 Write-Host "[ERROR] Failed to create remote $PathKey directory: $remotePath" -ForegroundColor Red
-                Write-Host "[ERROR] Create error details: $createResult" -ForegroundColor Red
+                Write-Debug-Message "[ERROR] Create error details: $createResult" -ForegroundColor Red
                 return $false
             }
         } elseif ($dirCheck -match "EXISTS") {
@@ -3373,7 +3325,7 @@ function Test-AndCreateDirectory {
             }
         } else {
             Write-Host "[ERROR] Could not check remote $PathKey directory: $remotePath" -ForegroundColor Red
-            Write-Host "[ERROR] SSH check error details: $dirCheck" -ForegroundColor Red
+            Write-Debug-Message "[ERROR] SSH check error details: $dirCheck" -ForegroundColor Red
             return $false
         }
     } else {
