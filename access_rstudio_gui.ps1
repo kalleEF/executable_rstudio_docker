@@ -4938,7 +4938,7 @@ $buttonStart.Add_Click({
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
                 Write-Host ""
                 $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                $buildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
+                $buildCommand = "cd '$dockerContextPath' && docker buildx build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
                 Write-Host ""
 
                 # Execute remote Docker build with real-time output
@@ -5113,7 +5113,7 @@ $buttonStart.Add_Click({
                             # Remote build of prerequisite with real-time output
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
                             $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                            $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache --progress=plain . 2>&1"
+                            $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker buildx build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache --progress=plain . 2>&1"
 
                             # Execute remote prerequisite build with real-time output
                             Write-Host "[INFO] Building prerequisite image on remote host (this may take 5-15 minutes)..." -ForegroundColor Cyan
@@ -5245,7 +5245,7 @@ $buttonStart.Add_Click({
                                     # Remote build retry with real-time output
                                     Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
                                     $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
-                                    $retryBuildCommand = "cd '$dockerContextPath' && docker build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
+                                    $retryBuildCommand = "cd '$dockerContextPath' && docker buildx build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
 
                                     # Execute remote retry build with real-time output
                                     Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -ForegroundColor Cyan
