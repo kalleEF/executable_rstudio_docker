@@ -41,6 +41,85 @@ function Write-Debug-Message {
 }
 
 #--------------------------------------#
+#   POWERSHELL VERSION CHECK            #
+#--------------------------------------#
+
+# Check PowerShell version and recommend PowerShell 7 if needed
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    $pwshAvailable = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    
+    if ($pwshAvailable) {
+        Write-Host ""
+        Write-Host "  [NOTICE] You're running Windows PowerShell 5.1" -ForegroundColor Yellow
+        Write-Host "  PowerShell 7 is available on your system and provides better compatibility." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Recommendation: Use PowerShell 7 for the best experience." -ForegroundColor Cyan
+        Write-Host "  Example: pwsh.exe -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor Cyan
+        Write-Host ""
+        
+        # Ask user if they want to restart with PowerShell 7
+        $usePS7 = Read-Host "  Would you like to restart with PowerShell 7 now? (y/n)"
+        if ($usePS7 -match "^[Yy]") {
+            Write-Host "  Restarting with PowerShell 7..." -ForegroundColor Green
+            try {
+                Start-Process "pwsh" -ArgumentList "-ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -Wait
+                exit
+            } catch {
+                Write-Host "  Failed to restart with PowerShell 7. Continuing with Windows PowerShell 5.1..." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  Continuing with Windows PowerShell 5.1..." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host ""
+        Write-Host "  [RECOMMENDATION] PowerShell 7 Installation" -ForegroundColor Yellow
+        Write-Host "  ===========================================" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  You're using Windows PowerShell 5.1. For better compatibility and features," -ForegroundColor White
+        Write-Host "  we recommend installing PowerShell 7 (the modern, cross-platform version)." -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Benefits of PowerShell 7:" -ForegroundColor Cyan
+        Write-Host "  • Better module compatibility" -ForegroundColor White
+        Write-Host "  • Improved performance" -ForegroundColor White
+        Write-Host "  • Enhanced error handling" -ForegroundColor White
+        Write-Host "  • Regular updates and security patches" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  Download PowerShell 7:" -ForegroundColor Green
+        Write-Host "  https://github.com/PowerShell/PowerShell/releases/latest" -ForegroundColor Blue
+        Write-Host ""
+        Write-Host "  Quick Install Options:" -ForegroundColor Green
+        Write-Host "  1. Via Microsoft Store: Search 'PowerShell'" -ForegroundColor White
+        Write-Host "  2. Via Winget: winget install Microsoft.PowerShell" -ForegroundColor White
+        Write-Host "  3. Via Direct Download from the link above" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  After installation, run: pwsh.exe -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor Cyan
+        Write-Host ""
+        
+        # Ask if user wants to open the download page
+        $openDownload = Read-Host "  Open PowerShell 7 download page in browser? (y/n)"
+        if ($openDownload -match "^[Yy]") {
+            try {
+                Start-Process "https://github.com/PowerShell/PowerShell/releases/latest"
+                Write-Host "  Download page opened in your default browser." -ForegroundColor Green
+                Write-Host "  This application will continue with Windows PowerShell 5.1 for now." -ForegroundColor Yellow
+            } catch {
+                Write-Host "  Could not open browser. Please manually visit:" -ForegroundColor Yellow
+                Write-Host "  https://github.com/PowerShell/PowerShell/releases/latest" -ForegroundColor Blue
+            }
+        }
+        
+        Write-Host ""
+        Write-Host "  Continuing with Windows PowerShell 5.1..." -ForegroundColor Yellow
+    }
+    
+    Write-Host ""
+} else {
+    Write-Host ""
+    Write-Host "  [SUCCESS] Running PowerShell $($PSVersionTable.PSVersion) (Core)" -ForegroundColor Green
+    Write-Host ""
+}
+
+#--------------------------------------#
 #   ADMINISTRATOR PRIVILEGE CHECK       #
 #--------------------------------------#
 
@@ -59,8 +138,17 @@ if (-not $isAdmin) {
         
         # If running as a script file
         if ($scriptPath) {
-            # Restart with elevated privileges
-            Start-Process PowerShell -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`" -STA" -Wait
+            # Use the current PowerShell executable for restart
+            $currentPSExecutable = if ($PSVersionTable.PSVersion.Major -ge 6) { 
+                "pwsh" 
+            } else { 
+                "PowerShell" 
+            }
+            
+            Write-Host "  Restarting with elevated privileges using: $currentPSExecutable" -ForegroundColor Cyan
+            
+            # Restart with elevated privileges using the current PowerShell version
+            Start-Process $currentPSExecutable -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`" -STA" -Wait
             exit
         } else {
             # If running interactively or as a compiled exe
@@ -772,7 +860,7 @@ $buttonRemote.Add_Click({
         
         # Use specific SSH key to avoid "Too many authentication failures"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-        
+
         # Validate that SSH key exists before attempting to use it
         if (-not (Test-Path $sshKeyPath)) {
             Write-Host ""
@@ -896,7 +984,7 @@ $buttonRemote.Add_Click({
                 Write-Host "  [INFO] Password provided, securing credentials..." -ForegroundColor Cyan
                 Write-Host ""
                 $securePassword = ConvertTo-SecureString $textRemotePassword.Text -AsPlainText -Force
-                
+                                
                 # Create credential object for secure handling
                 $hostParts = $remoteHost -split "@"
                 if ($hostParts.Count -eq 2) {
@@ -920,234 +1008,538 @@ $buttonRemote.Add_Click({
                 Write-Host "  [INFO] Credentials secured, testing connection..." -ForegroundColor Cyan
                 Write-Host ""
                 
-                # Test connection with password using a more reliable method
+                # Skip connection testing and proceed directly to SSH key copying
                 try {
                     Write-Host ""
-                    Write-Host "  [INFO] Testing SSH connection with password..." -ForegroundColor Cyan
+                    Write-Host "  [INFO] Setting up SSH key for passwordless authentication..." -ForegroundColor Cyan
+                    Write-Host "  This will allow future connections without password prompts"
                     Write-Host ""
-
-                    # Method 1: Try using plink (PuTTY's command line tool) if available
-                    $plinkPath = Get-Command plink.exe -ErrorAction SilentlyContinue
-                    if ($plinkPath) {
-                        Write-Host ""
-                        Write-Host "  Using PuTTY plink for password authentication..."
-                        Write-Host ""
-                        
-                        # Username and host already extracted during credential creation
-                        # Convert secure password to plain text only when needed for plink
-                        $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                        
-                        # Test connection with plink
-                        $plinkResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost "echo SSH_SUCCESS" 2>&1
-                        
-                        # Clear the plain text password from memory immediately
-                        $plainPassword = $null
-                        [System.GC]::Collect()
-                        
-                        if ($plinkResult -match "SSH_SUCCESS") {
-                            Write-Host ""
-                            Write-Host "  [SUCCESS] Password authentication successful!" -ForegroundColor Green
-                            Write-Host ""
-                            $authSuccess = $true
-                        } else {
-                            Write-Host ""
-                            Write-Host "  [ERROR] Password authentication failed with plink" -ForegroundColor Red
-                            Write-Host "  Output: $plinkResult"
-                            $authSuccess = $false
-                        }
-                        
-                    } else {
-                        # Method 2: Use expect-like functionality with PowerShell and SSH
-                        Write-Host ""
-                        Write-Host "  Using PowerShell SSH automation (plink not found)..."
-                        Write-Host ""
-
-                        # Convert secure password to plain text only when needed for batch script
-                        $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                        
-                        # Create a secure batch file for SSH with password (handle special characters)
-                        $batchFile = [System.IO.Path]::GetTempFileName() + ".bat"
-                        
-                        # Escape special characters in password for safe batch file usage
-                        $escapedPassword = $plainPassword -replace '[&<>|^]', '^$&' -replace '"', '""'
-                        
-                        $expectScript = @"
-@echo off
-setlocal EnableDelayedExpansion
-set "PASSWORD=$escapedPassword"
-echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "echo SSH_SUCCESS" 2>nul
-"@
-                        Set-Content -Path $batchFile -Value $expectScript
-                        
-                        # Execute the batch file
-                        $batchResult = & cmd.exe /c $batchFile 2>&1
-                        
-                        # Securely clean up the batch file and password
-                        Remove-Item $batchFile -Force -ErrorAction SilentlyContinue
-                        $plainPassword = $null
-                        $escapedPassword = $null
-                        [System.GC]::Collect()
-                        
-                        if ($batchResult -match "SSH_SUCCESS") {
-                            Write-Host ""
-                            Write-Host "  [SUCCESS] Password authentication successful!" -ForegroundColor Green
-                            Write-Host ""
-                            $authSuccess = $true
-                        } else {
-                            # Method 3: Try with sshpass if available (Windows Subsystem for Linux)
-                            $sshpassTest = Get-Command sshpass -ErrorAction SilentlyContinue
-                            if ($sshpassTest) {
-                                Write-Host ""
-                                Write-Host "  Trying with sshpass..."
-                                Write-Host ""
-                                
-                                # Use environment variable for password (more secure than command line)
-                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                $env:SSHPASS = $plainPassword
-                                
-                                # Use sshpass with environment variable instead of -p flag
-                                $sshpassResult = & sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost "echo SSH_SUCCESS" 2>&1
-                                
-                                # Clear the environment variable and password from memory immediately
-                                $env:SSHPASS = $null
-                                $plainPassword = $null
-                                [System.GC]::Collect()
-                                
-                                if ($sshpassResult -match "SSH_SUCCESS") {
-                                    Write-Host ""
-                                    Write-Host "  [SUCCESS] Password authentication successful with sshpass!" -ForegroundColor Green
-                                    Write-Host ""
-                                    $authSuccess = $true
-                                } else {
-                                    $authSuccess = $false
-                                }
-                            } else {
-                                Write-Host ""
-                                Write-Host "  [ERROR] Could not authenticate with available methods" -ForegroundColor Red
-                                Write-Host "  Output: $batchResult"
-                                $authSuccess = $false
-                            }
-                        }
-                    }
                     
-                    if ($authSuccess) {
-                        # Now copy the SSH key for future passwordless authentication
+                    # Get the public key content
+                    $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME.pub"
+                    if (Test-Path $sshPublicKeyPath) {
+                        $publicKeyContent = Get-Content $sshPublicKeyPath -Raw
+                        $publicKeyContent = $publicKeyContent.Trim()
+                        
                         Write-Host ""
-                        Write-Host "  [INFO] Setting up SSH key for passwordless authentication..." -ForegroundColor Cyan
-                        Write-Host "  This will allow future connections without password prompts"
+                        Write-Host "  Copying SSH key to remote host..."
                         Write-Host ""
                         
-                        # Get the public key content
-                        $sshPublicKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME.pub"
-                        if (Test-Path $sshPublicKeyPath) {
-                            $publicKeyContent = Get-Content $sshPublicKeyPath -Raw
-                            $publicKeyContent = $publicKeyContent.Trim()
+                        $keyCopySuccess = $false
+                        
+                        # Method 1: Try using Posh-SSH (PowerShell SSH module) first
+                        try {
+                            # Check if Posh-SSH module is available AND functional in current PowerShell version
+                            $poshSSHModule = Get-Module -ListAvailable -Name Posh-SSH -ErrorAction SilentlyContinue
+                            $poshSSHFunctional = $false
                             
-                            Write-Host ""
-                            Write-Host "  Copying SSH key to remote host..."
-                            Write-Host ""
+                            if ($poshSSHModule) {
+                                # Test if the module can be imported and has required cmdlets
+                                try {
+                                    Import-Module Posh-SSH -Force -ErrorAction Stop
+                                    
+                                    # Verify that required cmdlets are available
+                                    $requiredCmdlets = @('New-SSHSession', 'New-SFTPSession', 'Set-SFTPItem', 'Invoke-SSHCommand', 'Remove-SSHSession', 'Remove-SFTPSession')
+                                    $missingCmdlets = @()
+                                    
+                                    foreach ($cmdlet in $requiredCmdlets) {
+                                        if (-not (Get-Command $cmdlet -ErrorAction SilentlyContinue)) {
+                                            $missingCmdlets += $cmdlet
+                                        }
+                                    }
+                                    
+                                    if ($missingCmdlets.Count -eq 0) {
+                                        $poshSSHFunctional = $true
+                                        Write-Host "  [SUCCESS] Posh-SSH module found and functional" -ForegroundColor Green
+                                    } else {
+                                        Write-Host "  [WARNING] Posh-SSH module found but missing cmdlets: $($missingCmdlets -join ', ')" -ForegroundColor Yellow
+                                        Write-Host "  This usually means it's installed for a different PowerShell version" -ForegroundColor Yellow
+                                    }
+                                } catch {
+                                    Write-Host "  [WARNING] Posh-SSH module found but failed to import: $($_.Exception.Message)" -ForegroundColor Yellow
+                                }
+                            }
+                            
+                            if (-not $poshSSHFunctional) {
+                                Write-Host "  Posh-SSH module not functional for current PowerShell version, installing..." -ForegroundColor Cyan
+                                Write-Host "  PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
+                                Write-Host "  Module Path: $($env:PSModulePath -split ';' | Select-Object -First 1)" -ForegroundColor Cyan
+                                
+                                try {
+                                    # Ensure PowerShell Gallery is trusted and available
+                                    $psGallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+                                    if (-not $psGallery -or $psGallery.InstallationPolicy -ne 'Trusted') {
+                                        Write-Host "  Setting PowerShell Gallery as trusted repository..." -ForegroundColor Cyan
+                                        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+                                    }
+                                    
+                                    # For PowerShell 7, install to CurrentUser scope to ensure it goes to the right location
+                                    $installScope = if ($PSVersionTable.PSVersion.Major -ge 6) { 'CurrentUser' } else { 'AllUsers' }
+                                    Write-Host "  Installing to scope: $installScope" -ForegroundColor Cyan
+                                    
+                                    # Install Posh-SSH module
+                                    Write-Host "  Downloading and installing Posh-SSH module..." -ForegroundColor Cyan
+                                    Install-Module -Name Posh-SSH -Force -AllowClobber -Scope $installScope -ErrorAction Stop
+                                    
+                                    Write-Host "  [SUCCESS] Posh-SSH module installed successfully!" -ForegroundColor Green
+                                    
+                                    # Force module refresh and re-import
+                                    Write-Host "  Refreshing module cache and re-importing..." -ForegroundColor Cyan
+                                    
+                                    # Remove any existing module from current session
+                                    Get-Module Posh-SSH -ErrorAction SilentlyContinue | Remove-Module -Force
+                                    
+                                    # Clear module cache and force refresh
+                                    if (Get-Command Import-Module -ParameterName -Force -ErrorAction SilentlyContinue) {
+                                        Import-Module Posh-SSH -Force -Global -ErrorAction Stop
+                                    } else {
+                                        Import-Module Posh-SSH -Force -ErrorAction Stop
+                                    }
+                                    
+                                    # Re-check if module is now available and functional
+                                    $poshSSHModule = Get-Module -ListAvailable -Name Posh-SSH -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1
+                                    
+                                    if ($poshSSHModule) {
+                                        Write-Host "  [INFO] Posh-SSH version: $($poshSSHModule.Version)" -ForegroundColor Cyan
+                                        Write-Host "  [INFO] Installed at: $($poshSSHModule.ModuleBase)" -ForegroundColor Cyan
+                                        Write-Host "  [INFO] Module loaded from: $((Get-Module Posh-SSH).ModuleBase)" -ForegroundColor Cyan
+                                        
+                                        # Wait a moment for module to fully load
+                                        Start-Sleep -Milliseconds 500
+                                        
+                                        # Re-verify cmdlets are now available with more detailed checking
+                                        $requiredCmdlets = @('New-SSHSession', 'New-SFTPSession', 'Set-SFTPItem', 'Invoke-SSHCommand', 'Remove-SSHSession', 'Remove-SFTPSession')
+                                        $missingCmdlets = @()
+                                        $availableCmdlets = @()
+                                        
+                                        foreach ($cmdlet in $requiredCmdlets) {
+                                            $cmd = Get-Command $cmdlet -ErrorAction SilentlyContinue
+                                            if ($cmd) {
+                                                $availableCmdlets += "$cmdlet (from $($cmd.ModuleName))"
+                                            } else {
+                                                $missingCmdlets += $cmdlet
+                                            }
+                                        }
+                                        
+                                        Write-Host "  [INFO] Available cmdlets: $($availableCmdlets -join ', ')" -ForegroundColor Cyan
+                                        
+                                        if ($missingCmdlets.Count -eq 0) {
+                                            $poshSSHFunctional = $true
+                                            Write-Host "  [SUCCESS] All required cmdlets now available" -ForegroundColor Green
+                                        } else {
+                                            # Try one more time with explicit module specification
+                                            Write-Host "  [WARNING] Still missing cmdlets, trying alternative import method..." -ForegroundColor Yellow
+                                            
+                                            try {
+                                                # Try importing specific cmdlets
+                                                Import-Module Posh-SSH -Function $requiredCmdlets -Force -ErrorAction Stop
+                                                
+                                                # Check again
+                                                $missingCmdlets = @()
+                                                foreach ($cmdlet in $requiredCmdlets) {
+                                                    if (-not (Get-Command $cmdlet -ErrorAction SilentlyContinue)) {
+                                                        $missingCmdlets += $cmdlet
+                                                    }
+                                                }
+                                                
+                                                if ($missingCmdlets.Count -eq 0) {
+                                                    $poshSSHFunctional = $true
+                                                    Write-Host "  [SUCCESS] All required cmdlets now available via explicit import" -ForegroundColor Green
+                                                } else {
+                                                    throw "Still missing required cmdlets after explicit import: $($missingCmdlets -join ', ')"
+                                                }
+                                            } catch {
+                                                Write-Host "  [WARNING] Alternative import failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                                                throw "Missing required cmdlets after installation: $($missingCmdlets -join ', '). This may indicate a corrupted installation or PowerShell module path issue."
+                                            }
+                                        }
+                                    } else {
+                                        throw "Module installation appeared successful but module is still not available"
+                                    }
+                                } catch {
+                                    Write-Host "  [WARNING] Failed to install functional Posh-SSH: $($_.Exception.Message)" -ForegroundColor Yellow
+                                    Write-Host "  Falling back to plink method..." -ForegroundColor Cyan
+                                    $poshSSHFunctional = $false
+                                }
+                            }
+                            
+                            if ($poshSSHFunctional) {
+                                Write-Host "  Using Posh-SSH PowerShell module for key copying..." -ForegroundColor Cyan
+                                
+                                # Create SSH session for command execution
+                                Write-Host "  Testing Posh-SSH connection with functional verification..." -ForegroundColor Cyan
+                                Write-Host "  Connecting to: $sshHost as $sshUser" -ForegroundColor Cyan
+                                
+                                try {
+                                    # Quick functional test: create session and immediately test with a simple command
+                                    Write-Host "  Creating SSH session with quick timeout..." -ForegroundColor Cyan
+                                    
+                                    # Create SSH session with shorter timeout
+                                    $sshSession = New-SSHSession -ComputerName $sshHost -Credential $remoteCredential -AcceptKey -ConnectionTimeout 15 -ErrorAction Stop
+                                    
+                                    if (-not $sshSession) {
+                                        throw "SSH session creation returned null"
+                                    }
+                                    
+                                    $sessionId = $sshSession.SessionId
+                                    Write-Host "  Session ID: $sessionId, Testing functionality..." -ForegroundColor Cyan
+                                    
+                                    # Immediately test if the session actually works with a simple command
+                                    # This is much more reliable than checking connection status
+                                    $testCommand = Invoke-SSHCommand -SessionId $sessionId -Command "echo 'POSH_SSH_TEST_OK'" -TimeOut 10 -ErrorAction Stop
+                                    
+                                    if ($testCommand.Output -match "POSH_SSH_TEST_OK" -and $testCommand.ExitStatus -eq 0) {
+                                        Write-Host "  [SUCCESS] Posh-SSH functional test passed!" -ForegroundColor Green
+                                        Write-Host "  Response: $($testCommand.Output.Trim())" -ForegroundColor Green
+                                        
+                                        # Session is working, continue with key installation logic here...
+                                        # Create SFTP session for file transfer
+                                        Write-Host "  Creating SFTP session..." -ForegroundColor Cyan
+                                        $sftpSession = New-SFTPSession -ComputerName $sshHost -Credential $remoteCredential -AcceptKey -ConnectionTimeout 15 -ErrorAction Stop
+                                        
+                                        if (-not $sftpSession) {
+                                            throw "SFTP session creation failed"
+                                        }
+                                        
+                                        $sftpSessionId = $sftpSession.SessionId
+                                        Write-Host "  [SUCCESS] SFTP session created (ID: $sftpSessionId)" -ForegroundColor Green
+                                        
+                                    } else {
+                                        throw "Posh-SSH session created but test command failed. Output: '$($testCommand.Output)', Exit: $($testCommand.ExitStatus)"
+                                    }
+                                    
+                                } catch {
+                                    # Clean up any sessions that were created
+                                    try {
+                                        if ($sftpSessionId) { Remove-SFTPSession -SessionId $sftpSessionId -ErrorAction SilentlyContinue | Out-Null }
+                                        if ($sessionId) { Remove-SSHSession -SessionId $sessionId -ErrorAction SilentlyContinue | Out-Null }
+                                    } catch { }
+                                    
+                                    Write-Host "  [WARNING] Posh-SSH connection test failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                                    Write-Host "  This is normal - falling back to plink method..." -ForegroundColor Cyan
+                                    throw "Posh-SSH failed: $($_.Exception.Message)"
+                                }
+                                
+                                try {
+                                    # Create temporary file for public key
+                                    $tempKeyFile = "$env:TEMP\ps_key_tmp.pub"
+                                    Set-Content -Path $tempKeyFile -Value $publicKeyContent -NoNewline -Encoding ASCII
+                                    
+                                    # Verify the temp file exists and has content
+                                    if (-not (Test-Path $tempKeyFile)) {
+                                        throw "Temporary key file was not created successfully"
+                                    }
+                                    
+                                    $fileSize = (Get-Item $tempKeyFile).Length
+                                    if ($fileSize -eq 0) {
+                                        throw "Temporary key file is empty"
+                                    }
+                                    
+                                    Write-Host "  Key file size: $fileSize bytes" -ForegroundColor Cyan
+                                    
+                                    # Initialize upload success flag
+                                    $uploadSuccess = $false
+                                    
+                                    # Upload key file with better error handling
+                                    Write-Host "  Preparing for file upload to /tmp..." -ForegroundColor Cyan
+                                    
+                                    # Use simple filename in /tmp (most reliable location)
+                                    $uniqueFileName = "ssh_key_temp_$(Get-Date -Format 'HHmmss').pub"
+                                    $remoteTemp = "/tmp/$uniqueFileName"
+                                    
+                                    Write-Host "  Uploading key file to: $remoteTemp" -ForegroundColor Cyan
+                                    
+                                    try {
+                                        # Try uploading to /tmp first (most permissive location)
+                                        Write-Host "  [DEBUG] Attempting SFTP upload..." -ForegroundColor Magenta
+                                        Write-Host "  [DEBUG] Local file: $tempKeyFile" -ForegroundColor Magenta
+                                        Write-Host "  [DEBUG] Remote destination: $remoteTemp" -ForegroundColor Magenta
+                                        Write-Host "  [DEBUG] SFTP Session ID: $sftpSessionId" -ForegroundColor Magenta
+                                        
+                                        Set-SFTPItem -SessionId $sftpSessionId -Path $tempKeyFile -Destination $remoteTemp -ErrorAction Stop
+                                        Write-Host "  [SUCCESS] Key file uploaded to $remoteTemp" -ForegroundColor Green
+                                        $uploadSuccess = $true
+                                    } catch {
+                                        Write-Host "  [WARNING] SFTP upload failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                                        Write-Host "  [DEBUG] Full error details: $($_.Exception.ToString())" -ForegroundColor Magenta
+                                        
+                                        # Fallback: try using SSH to create the file directly
+                                        Write-Host "  Trying alternative method: creating file via SSH command..." -ForegroundColor Cyan
+                                        
+                                        try {
+                                            # Read the key content and create file directly via SSH
+                                            $keyContent = Get-Content $tempKeyFile -Raw
+                                            $keyContent = $keyContent.Trim() -replace "'", "'\''"  # Escape single quotes
+                                            
+                                            Write-Host "  [DEBUG] Key content length: $($keyContent.Length) characters" -ForegroundColor Magenta
+                                            Write-Host "  [DEBUG] First 50 chars of key: $($keyContent.Substring(0, [Math]::Min(50, $keyContent.Length)))" -ForegroundColor Magenta
+                                            Write-Host "  [DEBUG] Creating file command: echo '[KEY_CONTENT]' > $remoteTemp" -ForegroundColor Magenta
+                                            
+                                            $createFileCommand = "echo '$keyContent' > $remoteTemp && echo 'FILE_CREATED' && ls -la $remoteTemp"
+                                            Write-Host "  [DEBUG] Executing SSH command..." -ForegroundColor Magenta
+                                            
+                                            $createResult = Invoke-SSHCommand -SessionId $sessionId -Command $createFileCommand -ErrorAction Stop
+                                            
+                                            Write-Host "  [DEBUG] SSH command exit status: $($createResult.ExitStatus)" -ForegroundColor Magenta
+                                            Write-Host "  [DEBUG] SSH command output: '$($createResult.Output)'" -ForegroundColor Magenta
+                                            
+                                            if ($createResult.Output -match "FILE_CREATED") {
+                                                Write-Host "  [SUCCESS] Key file created via SSH command" -ForegroundColor Green
+                                                $uploadSuccess = $true
+                                            } else {
+                                                throw "SSH file creation failed: $($createResult.Output)"
+                                            }
+                                        } catch {
+                                            Write-Host "  [ERROR] Alternative method also failed: $($_.Exception.Message)" -ForegroundColor Red
+                                            Write-Host "  [DEBUG] Alternative method error details: $($_.Exception.ToString())" -ForegroundColor Magenta
+                                            throw "Failed to upload key file using both SFTP and SSH methods"
+                                        }
+                                    }
+                                    
+                                    # Only proceed if upload was successful
+                                    if (-not $uploadSuccess) {
+                                        throw "Failed to upload key file to remote host"
+                                    }
+                                    
+                                    Write-Host "  [DEBUG] File upload successful, proceeding with key validation on remote..." -ForegroundColor Magenta
+                                    
+                                    # Compose remote script to install the key properly
+                                    Write-Host "  [DEBUG] Preparing remote installation script..." -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Using USERNAME from script: $USERNAME" -ForegroundColor Magenta
+                                    
+                                    # Create the script with proper line endings and variable substitution
+                                    $remoteScriptContent = @"
+set -eu
+umask 077
+echo "SCRIPT_START"
 
-                            # Use the same authentication method that worked for copying the key
+# Get actual user info
+ACTUAL_USER=`$(whoami)
+HOME_DIR=`$(eval echo ~`$ACTUAL_USER)
+USER_SSH_DIR="`$HOME_DIR/.ssh"
+AUTH_KEYS="`$USER_SSH_DIR/authorized_keys"
+KEY_TARGET_PUB="`$USER_SSH_DIR/id_ed25519_$USERNAME.pub"
+
+echo "ACTUAL_USER: `$ACTUAL_USER"
+echo "HOME_DIR: `$HOME_DIR"
+echo "USER_SSH_DIR: `$USER_SSH_DIR"
+echo "AUTH_KEYS: `$AUTH_KEYS"
+echo "KEY_TARGET_PUB: `$KEY_TARGET_PUB"
+
+# Ensure home directory exists
+if [ ! -d "`$HOME_DIR" ]; then
+  echo "Creating home directory: `$HOME_DIR"
+  mkdir -p "`$HOME_DIR"
+  chown `$ACTUAL_USER:`$ACTUAL_USER "`$HOME_DIR"
+  chmod 755 "`$HOME_DIR"
+  echo "Home directory created"
+else
+  echo "Home directory exists: `$HOME_DIR"
+fi
+
+# Create .ssh directory if it doesn't exist
+if [ ! -d "`$USER_SSH_DIR" ]; then
+  echo "Creating SSH directory: `$USER_SSH_DIR"
+  mkdir -p "`$USER_SSH_DIR"
+  chown `$ACTUAL_USER:`$ACTUAL_USER "`$USER_SSH_DIR"
+  chmod 700 "`$USER_SSH_DIR"
+  echo "SSH directory created and permissions set"
+else
+  echo "SSH directory already exists: `$USER_SSH_DIR"
+fi
+
+# Create authorized_keys file if it doesn't exist
+if [ ! -f "`$AUTH_KEYS" ]; then
+  echo "Creating authorized_keys file: `$AUTH_KEYS"
+  touch "`$AUTH_KEYS"
+  chown `$ACTUAL_USER:`$ACTUAL_USER "`$AUTH_KEYS"
+  chmod 600 "`$AUTH_KEYS"
+  echo "authorized_keys file created and permissions set"
+else
+  echo "authorized_keys file already exists: `$AUTH_KEYS"
+fi
+
+# Check if temp file exists
+if [ ! -f "$remoteTemp" ]; then
+  echo "ERROR: Temp file does not exist: $remoteTemp"
+  exit 1
+else
+  echo "Temp file found: $remoteTemp"
+  echo "Temp file size: `$(wc -c < $remoteTemp) bytes"
+fi
+
+# Copy the public key file to the SSH directory (optional - for reference)
+echo "Copying public key file to: `$KEY_TARGET_PUB"
+cp "$remoteTemp" "`$KEY_TARGET_PUB"
+chown `$ACTUAL_USER:`$ACTUAL_USER "`$KEY_TARGET_PUB"
+chmod 644 "`$KEY_TARGET_PUB"
+echo "Public key file copied and permissions set"
+
+# Read the key content for authorized_keys
+echo "Reading key content from copied file..."
+NEW_KEY=`$(cat "`$KEY_TARGET_PUB")
+echo "Key content length: `${#NEW_KEY} characters"
+echo "Key content preview: `${NEW_KEY:0:50}..."
+
+# Only append if not already present (exact match check)
+echo "Checking if key already exists in authorized_keys..."
+if ! grep -qxF "`$NEW_KEY" "`$AUTH_KEYS"; then
+  echo "Key not found in authorized_keys, adding it..."
+  echo "`$NEW_KEY" >> "`$AUTH_KEYS"
+  echo "KEY_ADDED"
+else
+  echo "Key already exists in authorized_keys"
+  echo "KEY_ALREADY_EXISTS"
+fi
+
+# Ensure correct permissions on all files
+echo "Setting correct permissions..."
+chmod 755 "`$HOME_DIR"
+chmod 700 "`$USER_SSH_DIR"
+chmod 600 "`$AUTH_KEYS"
+chmod 644 "`$KEY_TARGET_PUB"
+echo "Permissions updated"
+
+# Fix ownership to ensure everything belongs to the user
+echo "Fixing ownership..."
+chown `$ACTUAL_USER:`$ACTUAL_USER "`$HOME_DIR"
+chown -R `$ACTUAL_USER:`$ACTUAL_USER "`$USER_SSH_DIR"
+echo "Ownership fixed"
+
+# Fix SELinux context if available
+if command -v restorecon >/dev/null 2>&1; then
+  echo "Fixing SELinux context..."
+  restorecon -Rv "`$USER_SSH_DIR" || true
+  echo "SELinux context fixed"
+else
+  echo "SELinux not available, skipping context fix"
+fi
+
+echo "Cleaning up temp file..."
+rm -f "$remoteTemp"
+echo "Temp file removed"
+
+echo "SSH_KEY_COPIED"
+echo "SCRIPT_END"
+"@
+
+                                    # Convert Windows line endings to Unix line endings
+                                    $remoteScript = $remoteScriptContent -replace "`r`n", "`n" -replace "`r", "`n"
+                                    
+                                    Write-Host "  [DEBUG] Executing remote installation script..." -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Script length: $($remoteScript.Length) characters" -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Session ID: $sessionId" -ForegroundColor Magenta
+                                    
+                                    # Execute the remote script
+                                    $scriptResult = Invoke-SSHCommand -SessionId $sessionId -Command $remoteScript -ErrorAction Stop
+                                    
+                                    Write-Host "  [DEBUG] Remote script execution completed" -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Remote script exit status: $($scriptResult.ExitStatus)" -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Output length: $($scriptResult.Output.Length) characters" -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Error length: $($scriptResult.Error.Length) characters" -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] Remote script output:" -ForegroundColor Magenta
+                                    Write-Host "  [DEBUG] ===================" -ForegroundColor Magenta
+                                    if ($scriptResult.Output) {
+                                        Write-Host "$($scriptResult.Output)" -ForegroundColor Magenta
+                                    } else {
+                                        Write-Host "  [DEBUG] NO OUTPUT RECEIVED" -ForegroundColor Red
+                                    }
+                                    Write-Host "  [DEBUG] ===================" -ForegroundColor Magenta
+                                    if ($scriptResult.Error) {
+                                        Write-Host "  [DEBUG] Remote script errors:" -ForegroundColor Red
+                                        Write-Host "  [DEBUG] ===================" -ForegroundColor Red
+                                        Write-Host "$($scriptResult.Error)" -ForegroundColor Red
+                                        Write-Host "  [DEBUG] ===================" -ForegroundColor Red
+                                    }
+                                    
+                                    if ($scriptResult.Output -match "SSH_KEY_COPIED") {
+                                        if ($scriptResult.Output -match "KEY_ALREADY_EXISTS") {
+                                            Write-Host "  [INFO] SSH key already exists in authorized_keys (Posh-SSH)" -ForegroundColor Cyan
+                                        } else {
+                                            Write-Host "  [SUCCESS] SSH key copied using Posh-SSH!" -ForegroundColor Green
+                                        }
+                                        $keyCopySuccess = $true
+                                    } else {
+                                        Write-Host "  [WARNING] Posh-SSH key copy may have failed: $($scriptResult.Output)" -ForegroundColor Yellow
+                                        Write-Host "  [DEBUG] Expected 'SSH_KEY_COPIED' marker not found in output" -ForegroundColor Magenta
+                                    }
+                                    
+                                } finally {
+                                    # Clean up temp file and sessions
+                                    if (Test-Path $tempKeyFile) { Remove-Item $tempKeyFile -Force -ErrorAction SilentlyContinue }
+                                    if ($sessionId) { Remove-SSHSession -SessionId $sessionId | Out-Null }
+                                    if ($sftpSessionId) { Remove-SFTPSession -SessionId $sftpSessionId | Out-Null }
+                                }
+                                
+                            } else {
+                                Write-Host "  Posh-SSH module not available, trying plink..." -ForegroundColor Yellow
+                            }
+                        } catch {
+                            Write-Host "  [WARNING] Posh-SSH method failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                            Write-Host "  Trying plink as fallback..." -ForegroundColor Cyan
+                        }
+                        
+                        # Method 2: Fallback to plink if Posh-SSH failed or unavailable
+                        if (-not $keyCopySuccess) {
+                            $plinkPath = Get-Command plink.exe -ErrorAction SilentlyContinue
                             if ($plinkPath) {
-                            # Use plink to copy the SSH key (securely with proper formatting)
-                                $keyCommand = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
+                                Write-Host "  Using PuTTY plink as fallback for key copying..." -ForegroundColor Cyan
+                                
+                                # First check if key already exists to avoid duplicates
+                                $checkCommand = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && if grep -qxF '$publicKeyContent' ~/.ssh/authorized_keys; then echo 'KEY_EXISTS'; else echo 'KEY_NOT_FOUND'; fi"
                                 
                                 # Convert secure password to plain text only when needed
                                 $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                $keyCopyResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $keyCommand 2>&1
+                                $checkResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $checkCommand 2>&1
+                                
+                                if ($checkResult -match "KEY_EXISTS") {
+                                    Write-Host "  [INFO] SSH key already exists in authorized_keys (plink)" -ForegroundColor Cyan
+                                    $keyCopySuccess = $true
+                                } elseif ($checkResult -match "KEY_NOT_FOUND") {
+                                    # Key doesn't exist, so add it
+                                    $keyCommand = "echo '$publicKeyContent' >> ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
+                                    $keyCopyResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $keyCommand 2>&1
+                                    
+                                    if ($keyCopyResult -match "SSH_KEY_COPIED") {
+                                        Write-Host "  [SUCCESS] SSH key copied using plink!" -ForegroundColor Green
+                                        $keyCopySuccess = $true
+                                    } else {
+                                        Write-Host "  [ERROR] plink key copy failed: $keyCopyResult" -ForegroundColor Red
+                                    }
+                                } else {
+                                    Write-Host "  [ERROR] plink key existence check failed: $checkResult" -ForegroundColor Red
+                                }
                                 
                                 # Clear the plain text password from memory immediately
                                 $plainPassword = $null
                                 [System.GC]::Collect()
-                                
-                            } elseif ($sshpassTest) {
-                                # Use sshpass to copy the SSH key (securely with proper formatting)
-                                $keyCommand = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$publicKeyContent' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED"
-                                
-                                # Use environment variable for password (more secure than command line)
-                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                $env:SSHPASS = $plainPassword
-                                
-                                # Use sshpass with environment variable instead of -p flag
-                                $keyCopyResult = & sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost $keyCommand 2>&1
-                                
-                                # Clear the environment variable and password from memory immediately
-                                $env:SSHPASS = $null
-                                $plainPassword = $null
-                                [System.GC]::Collect()
-                                
                             } else {
-                                # Use batch method to copy SSH key (securely with special character handling)
-                                $keyBatchFile = [System.IO.Path]::GetTempFileName() + ".bat"
-                                
-                                # Convert secure password to plain text only when needed for batch script
-                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                
-                                # Escape special characters in password for safe batch file usage
-                                $escapedPassword = $plainPassword -replace '[&<>|^]', '^$&' -replace '"', '""'
-                                
-                                # Use base64 encoding to safely transfer SSH key content (avoids shell escaping issues)
-                                # Note: Requires 'base64' command to be available on the remote Linux system
-                                $keyBase64 = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($publicKeyContent))
-                                
-                                $keyBatchScript = @"
-@echo off
-setlocal EnableDelayedExpansion
-set "PASSWORD=$escapedPassword"
-echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo $keyBase64 | base64 -d >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo SSH_KEY_COPIED" 2>nul
-"@
-                                Set-Content -Path $keyBatchFile -Value $keyBatchScript
-                                $keyCopyResult = & cmd.exe /c $keyBatchFile 2>&1
-                                
-                                # Securely clean up the batch file and password
-                                Remove-Item $keyBatchFile -Force -ErrorAction SilentlyContinue
-                                $plainPassword = $null
-                                $escapedPassword = $null
-                                $keyBase64 = $null
-                                [System.GC]::Collect()
+                                Write-Host "  [ERROR] Neither Posh-SSH nor plink available for key copying" -ForegroundColor Red
+                                Write-Host "  Please install either:" -ForegroundColor Yellow
+                                Write-Host "  - Posh-SSH module: Install-Module Posh-SSH -Scope CurrentUser" -ForegroundColor Yellow
+                                Write-Host "  - PuTTY (plink.exe) from https://www.putty.org/" -ForegroundColor Yellow
                             }
+                        }
+                        
+                        if ($keyCopySuccess) {
+                            # Success message and optional cleanup
+                            Write-Host ""
+                            Write-Host "  [SUCCESS] SSH key successfully set up on remote host!" -ForegroundColor Green
+                            Write-Host "  Future connections will not require password"
+                            Write-Host ""
                             
-                            if ($keyCopyResult -match "SSH_KEY_COPIED") {
-                                Write-Host ""
-                                Write-Host "  [SUCCESS] SSH key successfully copied to remote host!" -ForegroundColor Green
-                                Write-Host "  Future connections will not require password"
-                                Write-Host ""
-                                
-                                # Clean up any duplicate entries in authorized_keys
-                                Write-Host "  [INFO] Cleaning up authorized_keys file..." -ForegroundColor Cyan
-                                if ($plinkPath) {
-                                    $cleanupCommand = "sort ~/.ssh/authorized_keys | uniq > ~/.ssh/authorized_keys.tmp && mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-                                    $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                    & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $cleanupCommand 2>&1 | Out-Null
-                                    $plainPassword = $null
-                                    [System.GC]::Collect()
-                                } elseif ($sshpassTest) {
-                                    $cleanupCommand = "sort ~/.ssh/authorized_keys | uniq > ~/.ssh/authorized_keys.tmp && mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-                                    $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                    $env:SSHPASS = $plainPassword
-                                    & sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost $cleanupCommand 2>&1 | Out-Null
-                                    $env:SSHPASS = $null
-                                    $plainPassword = $null
-                                    [System.GC]::Collect()
-                                } else {
-                                    # Use batch method for cleanup
-                                    $cleanupBatchFile = [System.IO.Path]::GetTempFileName() + ".bat"
-                                    $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                    $escapedPassword = $plainPassword -replace '[&<>|^]', '^$&' -replace '"', '""'
-                                    $cleanupBatchScript = @"
-@echo off
-setlocal EnableDelayedExpansion
-set "PASSWORD=$escapedPassword"
-echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no $remoteHost "sort ~/.ssh/authorized_keys | uniq > ~/.ssh/authorized_keys.tmp && mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" 2>nul
-"@
-                                    Set-Content -Path $cleanupBatchFile -Value $cleanupBatchScript
-                                    & cmd.exe /c $cleanupBatchFile 2>&1 | Out-Null
-                                    Remove-Item $cleanupBatchFile -Force -ErrorAction SilentlyContinue
-                                    $plainPassword = $null
-                                    $escapedPassword = $null
-                                    [System.GC]::Collect()
-                                }
-                                Write-Host "  [INFO] authorized_keys cleanup completed" -ForegroundColor Cyan
+                            # Only run cleanup if we used plink and actually added a new key (not if key already existed)
+                            if ($plinkPath -and -not $poshSSHModule -and $keyCopyResult -match "SSH_KEY_COPIED") {
+                                Write-Host "  [INFO] Running additional cleanup for plink method..." -ForegroundColor Cyan
+                                $cleanupCommand = "sort ~/.ssh/authorized_keys | uniq > ~/.ssh/authorized_keys.tmp && mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+                                $plainPassword = $remoteCredential.GetNetworkCredential().Password
+                                & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $cleanupCommand 2>&1 | Out-Null
+                                $plainPassword = $null
+                                [System.GC]::Collect()
+                                Write-Host "  [INFO] Cleanup completed" -ForegroundColor Cyan
+                            } else {
+                                Write-Host "  [INFO] No additional cleanup needed" -ForegroundColor Cyan
+                            }
                                 
                                 # Test passwordless connection with retry logic
                                 Write-Host "  [INFO] Testing passwordless SSH connection..." -ForegroundColor Cyan
@@ -1365,71 +1757,42 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                                     Write-Host "  Authentication: SSH Key copied (passwordless may work later)"
                                     Write-Host ""
                                 }
-                            } else {
-                                Write-Host ""
-                                Write-Host "  [WARNING] Failed to copy SSH key to remote host" -ForegroundColor Yellow
-                                Write-Host "  Expected: SSH_KEY_COPIED"
-                                Write-Host "  Actual result: $keyCopyResult"
-                                Write-Host "  Password authentication will be required for future connections"
-                                Write-Host ""
-                                
-                                # Try to diagnose the issue
-                                Write-Host "  [INFO] Checking if authorized_keys file was created..." -ForegroundColor Cyan
-                                if ($plinkPath) {
-                                    $checkCommand = "ls -la ~/.ssh/authorized_keys 2>/dev/null || echo 'FILE_NOT_FOUND'"
-                                    $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                    $checkResult = & plink.exe -ssh -batch -pw $plainPassword -l $sshUser $sshHost $checkCommand 2>&1
-                                    $plainPassword = $null
-                                    [System.GC]::Collect()
-                                    Write-Host "  File check result: $checkResult" -ForegroundColor Yellow
-                                } elseif ($sshpassTest) {
-                                    $checkCommand = "ls -la ~/.ssh/authorized_keys 2>/dev/null || echo 'FILE_NOT_FOUND'"
-                                    $plainPassword = $remoteCredential.GetNetworkCredential().Password
-                                    $env:SSHPASS = $plainPassword
-                                    $checkResult = & sshpass -e ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no $remoteHost $checkCommand 2>&1
-                                    $env:SSHPASS = $null
-                                    $plainPassword = $null
-                                    [System.GC]::Collect()
-                                    Write-Host "  File check result: $checkResult" -ForegroundColor Yellow
-                                }
-                            }
                         } else {
                             Write-Host ""
-                            Write-Host "  [ERROR] SSH public key not found at: $sshPublicKeyPath" -ForegroundColor Red
-                            Write-Host "  Cannot set up passwordless authentication"
+                            Write-Host "  [WARNING] Failed to copy SSH key to remote host with all available methods" -ForegroundColor Yellow
+                            Write-Host "  Password authentication will be required for future connections"
+                            Write-Host ""
+                            Write-Host "  [INFO] Please ensure:" -ForegroundColor Cyan
+                            Write-Host "  - SSH service is running on remote host" -ForegroundColor Cyan
+                            Write-Host "  - Password authentication is enabled" -ForegroundColor Cyan
+                            Write-Host "  - User has permissions to write to ~/.ssh directory" -ForegroundColor Cyan
+                            Write-Host "  - Consider installing Posh-SSH: Install-Module Posh-SSH -Scope CurrentUser" -ForegroundColor Cyan
                             Write-Host ""
                         }
+                    } else {
+                        Write-Host ""
+                        Write-Host "  [ERROR] SSH public key not found at: $sshPublicKeyPath" -ForegroundColor Red
+                        Write-Host "  Cannot set up passwordless authentication"
+                        Write-Host ""
                         
-                        # Extract IP address and continue
+                        # Still set IP address for potential manual setup
                         $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
                         $script:REMOTE_HOST_IP = $remoteIP
-                        
-                        # Secure cleanup: Clear the credential object from memory
-                        $remoteCredential = $null
-                        $securePassword = $null
-                        [System.GC]::Collect()
-                        Write-Host ""
-                        Write-Host "  [INFO] Credentials securely cleared from memory" -ForegroundColor Cyan
-                        Write-Host ""
-                        
-                    } else {
-                        # Secure cleanup: Clear the credential object from memory even on failure
-                        $remoteCredential = $null
-                        $securePassword = $null
-                        [System.GC]::Collect()
-                        
-                        Write-Host ""
-                        Write-Host "  [ERROR] All password authentication methods failed" -ForegroundColor Red
-                        Write-Host ""
-                        Write-Host "  Troubleshooting suggestions:"
-                        Write-Host "  1. Verify the password is correct"
-                        Write-Host "  2. Check if SSH service is running on remote host"
-                        Write-Host "  3. Ensure password authentication is enabled on remote host"
-                        Write-Host "  4. Try installing PuTTY (plink.exe) for better SSH support"
-                        Write-Host ""
-                        [System.Windows.Forms.MessageBox]::Show("Password authentication failed with all available methods.`n`nPlease check:`n- Password is correct`n- SSH service is running on remote host`n- Password authentication is enabled`n- Consider installing PuTTY for better compatibility", "Authentication Failed", "OK", "Error")
-                        return
                     }
+                    
+                    # Extract IP address and continue (for successful key copy cases)
+                    if (-not $script:REMOTE_HOST_IP) {
+                        $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
+                        $script:REMOTE_HOST_IP = $remoteIP
+                    }
+                    
+                    # Secure cleanup: Clear the credential object from memory
+                    $remoteCredential = $null
+                    $securePassword = $null
+                    [System.GC]::Collect()
+                    Write-Host ""
+                    Write-Host "  [INFO] Credentials securely cleared from memory" -ForegroundColor Cyan
+                    Write-Host ""
                     
                 } catch {
                     # Secure cleanup: Clear the credential object from memory on exception
@@ -1440,10 +1803,10 @@ echo !PASSWORD! | ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o Passwo
                     }
 
                     Write-Host ""
-                    Write-Host "  [ERROR] Failed to test password authentication" -ForegroundColor Red
+                    Write-Host "  [ERROR] Failed to copy SSH key" -ForegroundColor Red
                     Write-Host "  Details: $($_.Exception.Message)"
                     Write-Host ""
-                    [System.Windows.Forms.MessageBox]::Show("Failed to test password authentication.`n`nError: $($_.Exception.Message)", "Connection Error", "OK", "Error")
+                    [System.Windows.Forms.MessageBox]::Show("Failed to copy SSH key for passwordless authentication.`n`nError: $($_.Exception.Message)`n`nPlease ensure:`n- SSH service is running`n- Password is correct`n- User has proper permissions", "SSH Key Copy Error", "OK", "Error")
                     return
                 }
                 
@@ -5502,7 +5865,7 @@ $buttonOK.Add_Click({
 # Show the container management dialog
 Write-Host ""
 Write-Host "Showing container management interface..."
-$containerResult = $formContainer.ShowDialog()
+$null = $formContainer.ShowDialog()
 
 Write-Host ""
 Write-Host "Container management interface closed."
