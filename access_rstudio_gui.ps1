@@ -243,83 +243,6 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 Write-Debug-Message "[DEBUG] Windows Forms environment configured successfully"
 
-#--------------------------------------#
-#   SPINNER FUNCTIONS FOR BUILD FEEDBACK   #
-#--------------------------------------#
-
-# Global spinner variables
-$script:spinnerJob = $null
-$script:spinnerChars = @('|', '/', '-', '\')
-$script:spinnerIndex = 0
-
-function Start-Spinner {
-    param(
-        [string]$Message = "Processing"
-    )
-    
-    # Only stop existing spinner if one is actually running
-    if ($script:spinnerJob) {
-        Write-Debug-Message "[DEBUG] Stopping existing spinner before starting new one"
-        Stop-Spinner
-    }
-    
-    Write-Debug-Message "[DEBUG] Starting spinner with message: '$Message'"
-    
-    # Start new spinner job
-    $script:spinnerJob = Start-Job -ScriptBlock {
-        param($msg, $chars)
-        $index = 0
-        while ($true) {
-            $char = $chars[$index % $chars.Length]
-            if ($msg -and $msg.Trim()) {
-                Write-Host "`r$msg $char" -NoNewline
-            } else {
-                # For empty messages, just show the spinner character
-                Write-Host "`r $char" -NoNewline
-            }
-            Start-Sleep -Milliseconds 200
-            $index++
-        }
-    } -ArgumentList $Message, $script:spinnerChars
-}
-
-function Stop-Spinner {
-    Write-Debug-Message "[DEBUG] Stopping spinner..."
-    if ($script:spinnerJob) {
-        Stop-Job $script:spinnerJob -ErrorAction SilentlyContinue
-        Remove-Job $script:spinnerJob -ErrorAction SilentlyContinue
-        $script:spinnerJob = $null
-        Write-Host "`r" -NoNewline  # Clear the spinner line
-        Write-Debug-Message "[DEBUG] Spinner stopped and cleaned up"
-    } else {
-        Write-Debug-Message "[DEBUG] No active spinner to stop"
-    }
-}
-
-function Show-SpinnerWithProgress {
-    param(
-        [string]$Message,
-        [ScriptBlock]$ScriptBlock
-    )
-    
-    Write-Debug-Message "[DEBUG] Starting progress spinner for: '$Message'"
-    
-    Write-Host "$Message" -NoNewline
-    Start-Spinner -Message ""
-    
-    try {
-        $result = & $ScriptBlock
-        Stop-Spinner
-        Write-Host " [SUCCESS]" -ForegroundColor Green
-        Write-Debug-Message "[DEBUG] Progress spinner completed successfully"
-        return $result
-    } catch {
-        Stop-Spinner
-        Write-Host " [FAILED]" -ForegroundColor Red
-        Write-Debug-Message "[DEBUG] Progress spinner failed: $($_.Exception.Message)"
-        throw
-    }
-}
 
 #----------------------------------------------#
 #   STEP 1: PROMPT FOR USERNAME AND PASSWORD   #
@@ -896,7 +819,7 @@ Write-Debug-Message "[DEBUG] Creating container location selection form..."
 # Create a new form for local/remote selection
 $formConnection = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Container Location - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(450,240)
+    Size = New-Object System.Drawing.Size(450,280)
     StartPosition = 'CenterScreen'
     Location = New-Object System.Drawing.Point(400,300)
     FormBorderStyle = 'FixedDialog'
@@ -906,40 +829,57 @@ $formConnection = New-Object System.Windows.Forms.Form -Property @{
 # Instruction label
 $labelConnectionInstruction = New-Object System.Windows.Forms.Label -Property @{ 
     Text = "Please choose whether you want to work locally`n(e.g. for testing) or remotely on the workstation`n(e.g. running simulations for output)!"
-    Location = New-Object System.Drawing.Point(10,10)
-    Size = New-Object System.Drawing.Size(420,60)
+    Location = New-Object System.Drawing.Point(20,10)
+    Size = New-Object System.Drawing.Size(400,60)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
-    TextAlign = 'MiddleCenter'
+    TextAlign = 'TopLeft'
 }
 $formConnection.Controls.Add($labelConnectionInstruction)
 
-# Debug checkbox
-$checkBoxDebug = New-Object System.Windows.Forms.CheckBox -Property @{
-    Text = 'Enable Debug Mode (show detailed debug messages)'
-    Location = New-Object System.Drawing.Point(50,80)
-    Size = New-Object System.Drawing.Size(350,20)
-    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
-    Checked = $false
-}
-$formConnection.Controls.Add($checkBoxDebug)
-
-# Local Container button
+# Local Container button (left-aligned)
 $buttonLocal = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Local Container'
-    Location = New-Object System.Drawing.Point(80,120)
+    Location = New-Object System.Drawing.Point(20,80)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
 $formConnection.Controls.Add($buttonLocal)
 
-# Remote Container button
+# Remote Container button (left-aligned, below local button)
 $buttonRemote = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Remote Container'
-    Location = New-Object System.Drawing.Point(250,120)
+    Location = New-Object System.Drawing.Point(20,130)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
 $formConnection.Controls.Add($buttonRemote)
+
+# Remote IP address label and textbox (positioned next to remote button)
+$labelRemoteIP = New-Object System.Windows.Forms.Label -Property @{ 
+    Text = 'Remote IP Address:'
+    Location = New-Object System.Drawing.Point(160,135)
+    Size = New-Object System.Drawing.Size(120,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
+}
+$formConnection.Controls.Add($labelRemoteIP)
+
+$textRemoteIP = New-Object System.Windows.Forms.TextBox -Property @{ 
+    Location = New-Object System.Drawing.Point(280,135)
+    Size = New-Object System.Drawing.Size(120,20)
+    Text = '10.162.192.90'
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
+}
+$formConnection.Controls.Add($textRemoteIP)
+
+# Debug checkbox (positioned below remote button)
+$checkBoxDebug = New-Object System.Windows.Forms.CheckBox -Property @{
+    Text = 'Enable Debug Mode (show detailed debug messages)'
+    Location = New-Object System.Drawing.Point(20,180)
+    Size = New-Object System.Drawing.Size(350,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
+    Checked = $false
+}
+$formConnection.Controls.Add($checkBoxDebug)
 
 # Add click handlers for the buttons
 $buttonLocal.Add_Click({
@@ -982,8 +922,26 @@ $buttonRemote.Add_Click({
     
     Write-Debug-Message "[DEBUG] STEP 4.1.1: Starting SSH connection establishment and testing..."
     
-    # Define remote host (update this IP address to match your workstation)
-    $remoteHost = "php-workstation@10.162.192.90"  #TODO: Implement individual users!
+    # Get user-provided IP address and validate it
+    $userProvidedIP = $textRemoteIP.Text.Trim()
+    Write-Debug-Message "[DEBUG] User-provided IP address: $userProvidedIP"
+    
+    # Basic IP validation
+    if ([string]::IsNullOrWhiteSpace($userProvidedIP)) {
+        [System.Windows.Forms.MessageBox]::Show('Please enter a valid IP address for the remote host.', 'Invalid IP Address', 'OK', 'Error')
+        return
+    }
+    
+    # Simple IP format validation (basic check)
+    if ($userProvidedIP -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+        [System.Windows.Forms.MessageBox]::Show('Please enter a valid IP address format (e.g., 192.168.1.100).', 'Invalid IP Format', 'OK', 'Error')
+        return
+    }
+    
+    Write-Host "  Using remote IP address: $userProvidedIP" -ForegroundColor Cyan
+    
+    # Define remote host using user-provided IP (update this IP address to match your workstation)
+    $remoteHost = "php-workstation@$userProvidedIP"  #TODO: Implement individual users!
     Write-Debug-Message "[DEBUG] Target remote host: $remoteHost"
  
     # Test SSH connection with detailed feedback
