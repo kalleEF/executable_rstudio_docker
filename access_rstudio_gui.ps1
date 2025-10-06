@@ -40,6 +40,87 @@ function Write-Debug-Message {
     }
 }
 
+# Function to center forms on the screen where the cursor is currently located
+function Set-FormCenterOnCurrentScreen {
+    param(
+        [System.Windows.Forms.Form]$Form
+    )
+    
+    try {
+        # Add necessary Windows API types
+        Add-Type -TypeDefinition @"
+        using System;
+        using System.Runtime.InteropServices;
+        using System.Drawing;
+        
+        public struct POINT {
+            public int X;
+            public int Y;
+        }
+        
+        public struct RECT {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+        
+        public class Win32 {
+            [DllImport("user32.dll")]
+            public static extern bool GetCursorPos(out POINT lpPoint);
+            
+            [DllImport("user32.dll")]
+            public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+            
+            [DllImport("user32.dll")]
+            public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+        }
+        
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MONITORINFO {
+            public uint cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+        }
+"@
+        
+        # Get cursor position
+        $cursorPos = New-Object POINT
+        [Win32]::GetCursorPos([ref]$cursorPos) | Out-Null
+        
+        # Get monitor from cursor position
+        $monitor = [Win32]::MonitorFromPoint($cursorPos, 2) # MONITOR_DEFAULTTONEAREST
+        
+        # Get monitor info
+        $monitorInfo = New-Object MONITORINFO
+        $monitorInfo.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($monitorInfo)
+        [Win32]::GetMonitorInfo($monitor, [ref]$monitorInfo) | Out-Null
+        
+        # Calculate center position on the current monitor
+        $screenWidth = $monitorInfo.rcWork.Right - $monitorInfo.rcWork.Left
+        $screenHeight = $monitorInfo.rcWork.Bottom - $monitorInfo.rcWork.Top
+        $screenLeft = $monitorInfo.rcWork.Left
+        $screenTop = $monitorInfo.rcWork.Top
+        
+        $formWidth = $Form.Width
+        $formHeight = $Form.Height
+        
+        $centerX = $screenLeft + (($screenWidth - $formWidth) / 2)
+        $centerY = $screenTop + (($screenHeight - $formHeight) / 2)
+        
+        # Set form position
+        $Form.StartPosition = 'Manual'
+        $Form.Location = New-Object System.Drawing.Point([int]$centerX, [int]$centerY)
+        
+        Write-Debug-Message "[DEBUG] Form centered on current screen at: $([int]$centerX), $([int]$centerY)"
+        
+    } catch {
+        Write-Debug-Message "[DEBUG] Failed to center form on current screen, falling back to CenterScreen: $($_.Exception.Message)"
+        $Form.StartPosition = 'CenterScreen'
+    }
+}
+
 #--------------------------------------#
 #   POWERSHELL VERSION CHECK            #
 #--------------------------------------#
@@ -310,7 +391,7 @@ Write-Debug-Message "[DEBUG] Creating main credentials form..."
 # Build the form
 $form = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Remote Access - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(450,250)
+    Size = New-Object System.Drawing.Size(430,300)
     StartPosition = 'CenterScreen'
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
@@ -318,24 +399,45 @@ $form = New-Object System.Windows.Forms.Form -Property @{
 
 Write-Debug-Message "[DEBUG] Adding form controls (labels, textboxes, buttons)..."
 
-# Instruction label
-$labelInstruction = New-Object System.Windows.Forms.Label -Property @{ 
-    Text = "Please enter your username and a password`nfor your RStudio Server session:`n`n(Username will be normalized: spaces removed, lowercase)"
+# Instruction rich text box with formatting
+$rtbInstruction = New-Object System.Windows.Forms.RichTextBox -Property @{ 
     Location = New-Object System.Drawing.Point(10,10)
-    Size = New-Object System.Drawing.Size(380,70)
+    Size = New-Object System.Drawing.Size(380,120)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    ReadOnly = $true
+    BorderStyle = 'None'
+    BackColor = $form.BackColor
+    ScrollBars = 'None'
 }
-$form.Controls.Add($labelInstruction)
+
+# Add formatted text
+$rtbInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$rtbInstruction.AppendText("Please enter a username and a password!")
+$rtbInstruction.AppendText("`n`n")
+
+$rtbInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$rtbInstruction.SelectionColor = [System.Drawing.Color]::DarkRed
+$rtbInstruction.AppendText("Important:")
+$rtbInstruction.SelectionColor = [System.Drawing.Color]::Black
+$rtbInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$rtbInstruction.AppendText("`nThe username will be used for an SSH key and for container management.`nThe password will be used to login to your RStudio Server session.`n`n")
+
+$rtbInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
+$rtbInstruction.SelectionColor = [System.Drawing.Color]::DarkGray
+$rtbInstruction.AppendText("(Username will be normalized: spaces removed, lowercase)")
+
+$form.Controls.Add($rtbInstruction)
 
 # Username label and textbox
 $labelUser = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Username:'
-    Location = New-Object System.Drawing.Point(10,90)
+    Location = New-Object System.Drawing.Point(10,140)
     Size = New-Object System.Drawing.Size(100,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
 $form.Controls.Add($labelUser)
 $textUser = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(120,90)
+    Location = New-Object System.Drawing.Point(120,140)
     Size = New-Object System.Drawing.Size(250,20)
 }
 $form.Controls.Add($textUser)
@@ -343,12 +445,13 @@ $form.Controls.Add($textUser)
 # Password label and textbox
 $labelPass = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Password:'
-    Location = New-Object System.Drawing.Point(10,120)
+    Location = New-Object System.Drawing.Point(10,170)
     Size = New-Object System.Drawing.Size(100,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
 $form.Controls.Add($labelPass)
 $textPass = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(120,120)
+    Location = New-Object System.Drawing.Point(120,170)
     Size = New-Object System.Drawing.Size(250,20)
 }
 $form.Controls.Add($textPass)
@@ -356,14 +459,14 @@ $form.Controls.Add($textPass)
 # OK and Cancel buttons
 $buttonOK = New-Object System.Windows.Forms.Button -Property @{
     Text = 'OK'
-    Location = New-Object System.Drawing.Point(200,160)
+    Location = New-Object System.Drawing.Point(200,210)
     Size = New-Object System.Drawing.Size(75,30)
 }
 $form.Controls.Add($buttonOK)
 
 $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Cancel'
-    Location = New-Object System.Drawing.Point(290,160)
+    Location = New-Object System.Drawing.Point(290,210)
     Size = New-Object System.Drawing.Size(75,30)
     DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 }
@@ -372,6 +475,11 @@ $form.Controls.Add($buttonCancel)
 # Set default buttons
 $form.AcceptButton = $buttonOK
 $form.CancelButton = $buttonCancel
+
+# Set focus to username field when form is shown
+$form.Add_Shown({
+    $textUser.Focus()
+})
 
 # Add validation for OK button click
 $buttonOK.Add_Click({
@@ -596,6 +704,8 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
                    "The new key is here: $sshPublicKeyPath`n`n" +
                    "You need to add this key to your GitHub account to enable SSH access.`n`n" +
                    "Please go to:`nGitHub -> Settings -> SSH and GPG keys -> New SSH key`n`n" +
+                   "Enter a title/name for the SSH key and paste the key into the 'Key' field.`n`n" +
+                   "Save the key. Done!`n`n" +
                    "The key has been copied to your clipboard and will be shown in a separate window for manual copying."
         
         # Copy to clipboard
@@ -617,12 +727,12 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         $formKeyDisplay = New-Object System.Windows.Forms.Form -Property @{ 
             Text = 'SSH Public Key - GitHub Integration'
             Size = New-Object System.Drawing.Size(800,500)
-            StartPosition = 'CenterScreen'
             FormBorderStyle = 'FixedDialog'
             MaximizeBox = $false
             MinimizeBox = $false
             BackColor = [System.Drawing.Color]::White
         }
+        Set-FormCenterOnCurrentScreen -Form $formKeyDisplay
 
         # Title label with better styling
         $labelTitle = New-Object System.Windows.Forms.Label -Property @{ 
@@ -819,27 +929,40 @@ Write-Debug-Message "[DEBUG] Creating container location selection form..."
 # Create a new form for local/remote selection
 $formConnection = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Container Location - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(450,280)
-    StartPosition = 'CenterScreen'
+    Size = New-Object System.Drawing.Size(450,240)
     Location = New-Object System.Drawing.Point(400,300)
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
 }
+Set-FormCenterOnCurrentScreen -Form $formConnection
 
-# Instruction label
-$labelConnectionInstruction = New-Object System.Windows.Forms.Label -Property @{ 
-    Text = "Please choose whether you want to work locally`n(e.g. for testing) or remotely on the workstation`n(e.g. running simulations for output)!"
+# Instruction rich text box with formatting
+$rtbConnectionInstruction = New-Object System.Windows.Forms.RichTextBox -Property @{ 
     Location = New-Object System.Drawing.Point(20,10)
-    Size = New-Object System.Drawing.Size(400,60)
+    Size = New-Object System.Drawing.Size(400,50)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
-    TextAlign = 'TopLeft'
+    ReadOnly = $true
+    BorderStyle = 'None'
+    BackColor = $formConnection.BackColor
+    ScrollBars = 'None'
 }
-$formConnection.Controls.Add($labelConnectionInstruction)
+
+# Add formatted text
+$rtbConnectionInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$rtbConnectionInstruction.AppendText("Please choose whether you want to work locally")
+$rtbConnectionInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$rtbConnectionInstruction.AppendText(" (e.g. for testing) ")
+$rtbConnectionInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$rtbConnectionInstruction.AppendText("or remotely on the workstation")
+$rtbConnectionInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$rtbConnectionInstruction.AppendText(" (e.g. running simulations for output)!")
+
+$formConnection.Controls.Add($rtbConnectionInstruction)
 
 # Local Container button (left-aligned)
 $buttonLocal = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Local Container'
-    Location = New-Object System.Drawing.Point(20,80)
+    Location = New-Object System.Drawing.Point(20,60)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -848,7 +971,7 @@ $formConnection.Controls.Add($buttonLocal)
 # Remote Container button (left-aligned, below local button)
 $buttonRemote = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Remote Container'
-    Location = New-Object System.Drawing.Point(20,130)
+    Location = New-Object System.Drawing.Point(20,110)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -857,14 +980,14 @@ $formConnection.Controls.Add($buttonRemote)
 # Remote IP address label and textbox (positioned next to remote button)
 $labelRemoteIP = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Remote IP Address:'
-    Location = New-Object System.Drawing.Point(160,135)
+    Location = New-Object System.Drawing.Point(160,125)
     Size = New-Object System.Drawing.Size(120,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
 }
 $formConnection.Controls.Add($labelRemoteIP)
 
 $textRemoteIP = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(280,135)
+    Location = New-Object System.Drawing.Point(280,120)
     Size = New-Object System.Drawing.Size(120,20)
     Text = '10.162.192.90'
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
@@ -873,8 +996,8 @@ $formConnection.Controls.Add($textRemoteIP)
 
 # Debug checkbox (positioned below remote button)
 $checkBoxDebug = New-Object System.Windows.Forms.CheckBox -Property @{
-    Text = 'Enable Debug Mode (show detailed debug messages)'
-    Location = New-Object System.Drawing.Point(20,180)
+    Text = 'Enable Debug Mode (show detailed progress messages)'
+    Location = New-Object System.Drawing.Point(20,160)
     Size = New-Object System.Drawing.Size(350,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
     Checked = $false
@@ -1027,10 +1150,10 @@ $buttonRemote.Add_Click({
             $formPassword = New-Object System.Windows.Forms.Form -Property @{ 
                 Text = 'Remote Host Password - IMPACT NCD Germany'
                 Size = New-Object System.Drawing.Size(450,180)
-                StartPosition = 'CenterScreen'
                 FormBorderStyle = 'FixedDialog'
                 MaximizeBox = $false
             }
+            Set-FormCenterOnCurrentScreen -Form $formPassword
 
             # Instruction label
             $labelPasswordInstruction = New-Object System.Windows.Forms.Label -Property @{ 
@@ -2124,10 +2247,10 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     $formRepoSelection = New-Object System.Windows.Forms.Form -Property @{ 
         Text = 'Select Repository - IMPACT NCD Germany'
         Size = New-Object System.Drawing.Size(500,400)
-        StartPosition = 'CenterScreen'
         FormBorderStyle = 'FixedDialog'
         MaximizeBox = $false
     }
+    Set-FormCenterOnCurrentScreen -Form $formRepoSelection
 
     # Instruction label
     $labelRepoInstruction = New-Object System.Windows.Forms.Label -Property @{ 
@@ -3780,12 +3903,12 @@ function Show-GitCommitDialog {
     $commitForm = New-Object System.Windows.Forms.Form -Property @{
         Text = "Git Commit & Push"
         Size = New-Object System.Drawing.Size(600, 400)
-        StartPosition = "CenterScreen"
         MaximizeBox = $false
         MinimizeBox = $false
         FormBorderStyle = "FixedDialog"
         TopMost = $true
     }
+    Set-FormCenterOnCurrentScreen -Form $commitForm
     
     # Title label
     $titleLabel = New-Object System.Windows.Forms.Label -Property @{
@@ -4497,25 +4620,66 @@ Write-Host ""
 # Create the main container management form
 $formContainer = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Container Management - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(500,430)
-    StartPosition = 'CenterScreen'
+    Size = New-Object System.Drawing.Size(500,480)
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
 }
+Set-FormCenterOnCurrentScreen -Form $formContainer
 
-# Instruction label
-$labelInstruction = New-Object System.Windows.Forms.Label -Property @{ 
-    Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: $(if ($isContainerRunning) { 'RUNNING' } else { 'STOPPED' })"
+# Instruction rich textbox
+$labelInstruction = New-Object System.Windows.Forms.RichTextBox -Property @{ 
     Location = New-Object System.Drawing.Point(10,10)
-    Size = New-Object System.Drawing.Size(470,80)
+    Size = New-Object System.Drawing.Size(470,150)
+    ReadOnly = $true
+    BorderStyle = 'None'
+    BackColor = $formContainer.BackColor
+    ScrollBars = 'None'
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
+
+# Add formatted text to instruction rich textbox
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$labelInstruction.AppendText("Your username is: ")
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$labelInstruction.AppendText("$USERNAME`n`n")
+
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$labelInstruction.AppendText("The Rstudio Server username is: ")
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$labelInstruction.AppendText("rstudio`n")
+
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$labelInstruction.AppendText("Your Rstudio Server password is: ")
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$labelInstruction.AppendText("$PASSWORD`n`n")
+
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$labelInstruction.AppendText("The repository you are using is: ")
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$labelInstruction.AppendText("$($script:SELECTED_REPO)`n")
+
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$labelInstruction.AppendText("The name of the container will be: ")
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+$labelInstruction.AppendText("$CONTAINER_NAME`n`n")
+
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+$labelInstruction.AppendText("Status: ")
+$labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+if ($isContainerRunning) {
+    $labelInstruction.SelectionColor = [System.Drawing.Color]::Green
+    $labelInstruction.AppendText("RUNNING")
+} else {
+    $labelInstruction.SelectionColor = [System.Drawing.Color]::Red
+    $labelInstruction.AppendText("STOPPED")
+}
+
 $formContainer.Controls.Add($labelInstruction)
 
 # Start button
 $buttonStart = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Start Container'
-    Location = New-Object System.Drawing.Point(50,100)
+    Location = New-Object System.Drawing.Point(100,165)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
     Enabled = -not $isContainerRunning
@@ -4525,7 +4689,7 @@ $formContainer.Controls.Add($buttonStart)
 # Stop button  
 $buttonStop = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Stop Container'
-    Location = New-Object System.Drawing.Point(200,100)
+    Location = New-Object System.Drawing.Point(250,165)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
     Enabled = $isContainerRunning
@@ -4535,7 +4699,7 @@ $formContainer.Controls.Add($buttonStop)
 # Advanced Options section
 $labelAdvanced = New-Object System.Windows.Forms.Label -Property @{ 
     Text = "Advanced Options:"
-    Location = New-Object System.Drawing.Point(10,160)
+    Location = New-Object System.Drawing.Point(10,220)
     Size = New-Object System.Drawing.Size(470,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -4543,17 +4707,17 @@ $formContainer.Controls.Add($labelAdvanced)
 
 # Checkbox option
 $checkBoxVolumes = New-Object System.Windows.Forms.CheckBox -Property @{
-    Text = 'Use Docker Volumes (instead of bind mounts)'
-    Location = New-Object System.Drawing.Point(20,185)
-    Size = New-Object System.Drawing.Size(200,20)
+    Text = 'Use Docker Volumes'
+    Location = New-Object System.Drawing.Point(20,245)
+    Size = New-Object System.Drawing.Size(150,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
 $formContainer.Controls.Add($checkBoxVolumes)
 
 # Rebuild image checkbox option
 $checkBoxRebuild = New-Object System.Windows.Forms.CheckBox -Property @{
-    Text = 'Rebuild repo image (force rebuild even if exists)'
-    Location = New-Object System.Drawing.Point(230,185)
+    Text = 'Rebuild Docker image for repository'
+    Location = New-Object System.Drawing.Point(175,245)
     Size = New-Object System.Drawing.Size(250,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
@@ -4562,12 +4726,12 @@ $formContainer.Controls.Add($checkBoxRebuild)
 # Port override label and textbox
 $labelPort = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Port Override:'
-    Location = New-Object System.Drawing.Point(20,215)
-    Size = New-Object System.Drawing.Size(100,20)
+    Location = New-Object System.Drawing.Point(20,280)
+    Size = New-Object System.Drawing.Size(90,20)
 }
 $formContainer.Controls.Add($labelPort)
 $textBoxPort = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(130,215)
+    Location = New-Object System.Drawing.Point(110,275)
     Size = New-Object System.Drawing.Size(100,20)
     Text = '8787'
 }
@@ -4576,12 +4740,12 @@ $formContainer.Controls.Add($textBoxPort)
 # Custom parameters label and textbox
 $labelParams = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Custom Parameters:'
-    Location = New-Object System.Drawing.Point(20,245)
+    Location = New-Object System.Drawing.Point(20,315)
     Size = New-Object System.Drawing.Size(120,20)
 }
 $formContainer.Controls.Add($labelParams)
 $textBoxParams = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(150,245)
+    Location = New-Object System.Drawing.Point(140,310)
     Size = New-Object System.Drawing.Size(200,20)
     Text = ''
 }
@@ -4589,14 +4753,14 @@ $formContainer.Controls.Add($textBoxParams)
 
 # sim_design.yaml file label and textbox
 $labelSimDesign = New-Object System.Windows.Forms.Label -Property @{ 
-    Text = 'sim_design.yaml file used for directory creation:'
-    Location = New-Object System.Drawing.Point(20,275)
-    Size = New-Object System.Drawing.Size(280,20)
+    Text = 'sim_design.yaml file used for directories:'
+    Location = New-Object System.Drawing.Point(20,350)
+    Size = New-Object System.Drawing.Size(230,20)
 }
 $formContainer.Controls.Add($labelSimDesign)
 $textBoxSimDesign = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(310,275)
-    Size = New-Object System.Drawing.Size(160,20)
+    Location = New-Object System.Drawing.Point(250,345)
+    Size = New-Object System.Drawing.Size(220,20)
     Text = '..\inputs\sim_design.yaml'
 }
 $formContainer.Controls.Add($textBoxSimDesign)
@@ -4604,14 +4768,14 @@ $formContainer.Controls.Add($textBoxSimDesign)
 # OK and Cancel buttons
 $buttonOK = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Close'
-    Location = New-Object System.Drawing.Point(200,350)
+    Location = New-Object System.Drawing.Point(300,390)
     Size = New-Object System.Drawing.Size(75,30)
 }
 $formContainer.Controls.Add($buttonOK)
 
 $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Cancel'
-    Location = New-Object System.Drawing.Point(290,350)
+    Location = New-Object System.Drawing.Point(395,390)
     Size = New-Object System.Drawing.Size(75,30)
     DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 }
@@ -4620,6 +4784,72 @@ $formContainer.Controls.Add($buttonCancel)
 # Set default buttons
 $formContainer.AcceptButton = $buttonOK
 $formContainer.CancelButton = $buttonCancel
+
+# Helper function to update the instruction RichTextBox
+function Update-InstructionText {
+    param(
+        [string]$Status,
+        [string]$Location = $CONTAINER_LOCATION,
+        [string]$VolumesInfo = ""
+    )
+    
+    # Clear existing content
+    $labelInstruction.Clear()
+    
+    # Add formatted text to instruction rich textbox
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.AppendText("Your username is: ")
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.AppendText("$USERNAME`n`n")
+    
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.AppendText("The Rstudio Server username is: ")
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.AppendText("rstudio`n")
+    
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.AppendText("Your Rstudio Server password is: ")
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.AppendText("$PASSWORD`n`n")
+    
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.AppendText("The repository you are using is: ")
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.AppendText("$($script:SELECTED_REPO)`n")
+    
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.AppendText("The name of the container will be: ")
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.AppendText("$CONTAINER_NAME`n`n")
+    
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.AppendText("Status: ")
+    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    if ($Status -eq "RUNNING") {
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Green
+        $labelInstruction.AppendText("RUNNING")
+    } else {
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Red
+        $labelInstruction.AppendText("STOPPED")
+    }
+    
+    # Add location and volumes info if provided
+    if ($Location) {
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Black
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        $labelInstruction.AppendText(" Location: ")
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.AppendText($Location)
+    }
+    
+    if ($VolumesInfo) {
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Black
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        $labelInstruction.AppendText(" Volumes: ")
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.AppendText($VolumesInfo)
+    }
+}
 
 # Declare variables at form scope so both event handlers can access them
 $script:useVolumes = $false
@@ -5646,7 +5876,7 @@ RUN apk add --no-cache rsync
                 # Update UI state - container started successfully
                 $buttonStart.Enabled = $false
                 $buttonStop.Enabled = $true
-                $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION`nVolumes: Enabled"
+                Update-InstructionText -Status "RUNNING" -Location $CONTAINER_LOCATION -VolumesInfo "Enabled"
                 
             } else {
                 Write-Host "[WARNING] Container may have exited. Checking logs..." -ForegroundColor Yellow
@@ -5817,7 +6047,7 @@ RUN apk add --no-cache rsync
                 # Update UI state - container started successfully
                 $buttonStart.Enabled = $false
                 $buttonStop.Enabled = $true
-                $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: RUNNING`nLocation: $CONTAINER_LOCATION`nVolumes: Disabled"
+                Update-InstructionText -Status "RUNNING" -Location $CONTAINER_LOCATION -VolumesInfo "Disabled"
                 
             } else {
                 Write-Host ""
@@ -5943,7 +6173,7 @@ $buttonStop.Add_Click({
                     # Update UI state - container stopped successfully
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
+                    Update-InstructionText -Status "STOPPED" -Location $CONTAINER_LOCATION -VolumesInfo $(if($script:useVolumes) { "Enabled" } else { "Disabled" })
                     
                     Write-Host ""
                     Write-Host "==============================================="
