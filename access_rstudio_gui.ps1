@@ -25,9 +25,16 @@ TODOs:
  - Ensure the script works both locally and on remote hosts
 #>
 
+# Parameter to detect if this is an elevated restart
+param(
+    [switch]$ElevatedRestart,
+    [switch]$PS7Requested
+)
+
 # Global debug flag - controls visibility of debug messages
 $script:DEBUG_MODE = $false
 $script:USE_DIRECT_SSH_FOR_DOCKER = $false  # Flag for Docker context SSH limitations
+$script:userWantsPS7 = $false  # Flag to track PowerShell 7 preference for elevation
 
 # Debug write function that respects the global debug flag
 function Write-Debug-Message {
@@ -128,9 +135,19 @@ function Set-FormCenterOnCurrentScreen {
 Write-Debug-Message "[DEBUG] Starting PowerShell version check..."
 Write-Debug-Message "[DEBUG] Current PowerShell version: $($PSVersionTable.PSVersion)"
 Write-Debug-Message "[DEBUG] PowerShell edition: $($PSVersionTable.PSEdition)"
+Write-Debug-Message "[DEBUG] Elevated restart parameter: $ElevatedRestart"
+Write-Debug-Message "[DEBUG] PS7 requested parameter: $PS7Requested"
 
-# Check PowerShell version and recommend PowerShell 7 if needed
-if ($PSVersionTable.PSVersion.Major -lt 6) {
+# Show PS7 message if this is an elevated restart with PS7 requested
+if ($ElevatedRestart -and $PS7Requested) {
+    Write-Host ""
+    Write-Host "  [INFO] Restarted with elevated privileges as requested" -ForegroundColor Green
+    Write-Host "  [INFO] PowerShell 7 preference noted - continuing with current PowerShell version" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+# Check PowerShell version and recommend PowerShell 7 if needed (skip on elevated restart)
+if ($PSVersionTable.PSVersion.Major -lt 6 -and -not $ElevatedRestart) {
     Write-Debug-Message "[DEBUG] Detected Windows PowerShell (version < 6), checking for PowerShell 7..."
     $pwshAvailable = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     Write-Debug-Message "[DEBUG] PowerShell 7 availability check: $(if($pwshAvailable) { 'Available' } else { 'Not found' })"
@@ -145,20 +162,56 @@ if ($PSVersionTable.PSVersion.Major -lt 6) {
         Write-Host "  Example: pwsh.exe -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor Cyan
         Write-Host ""
         
-        # Ask user if they want to restart with PowerShell 7
-        $usePS7 = Read-Host "  Would you like to restart with PowerShell 7 now? (y/n)"
-        Write-Debug-Message "[DEBUG] User PowerShell 7 restart choice: $usePS7"
+        # Check if we're running as compiled EXE to determine input method
+        $scriptPath = $MyInvocation.MyCommand.Path
+        $isCompiledEXE = ($null -eq $scriptPath) -or ($scriptPath -like "*.exe")
+        
+        if ($isCompiledEXE) {
+            # For compiled EXE, use Windows Forms dialog instead of Read-Host
+            Write-Debug-Message "[DEBUG] Compiled EXE detected, using Windows Forms dialog for PowerShell 7 choice"
+            Add-Type -AssemblyName System.Windows.Forms
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                "PowerShell 7 is available and provides better compatibility.`n`nFor compiled executables, we'll continue with the current PowerShell version.`n`nWould you like to continue?",
+                "PowerShell Version Notice",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+            $usePS7 = if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { "y" } else { "n" }
+            Write-Debug-Message "[DEBUG] User PowerShell 7 choice via dialog: $usePS7"
+        } else {
+            # For script files, use Read-Host as normal
+            $usePS7 = Read-Host "  Would you like to restart with PowerShell 7 now? (y/n)"
+            Write-Debug-Message "[DEBUG] User PowerShell 7 restart choice: $usePS7"
+        }
         if ($usePS7 -match "^[Yy]") {
             Write-Debug-Message "[DEBUG] User chose to restart with PowerShell 7"
             Write-Host "  Restarting with PowerShell 7..." -ForegroundColor Green
+            
+            # Store the PS7 preference for later use
+            $script:userWantsPS7 = $true
+            
             try {
-                Write-Debug-Message "[DEBUG] Attempting to start PowerShell 7 with arguments: -ExecutionPolicy Bypass -File '$($MyInvocation.MyCommand.Path)'"
-                Start-Process "pwsh" -ArgumentList "-ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -Wait
-                Write-Debug-Message "[DEBUG] PowerShell 7 restart successful, exiting current session"
-                exit
+                # Detect if we're running as a compiled EXE and get the correct path
+                $scriptPath = $MyInvocation.MyCommand.Path
+                $isCompiledEXE = ($null -eq $scriptPath) -or ($scriptPath -like "*.exe")
+                
+                if ($isCompiledEXE) {
+                    # For compiled EXE, we can't restart with pwsh, we need to use the EXE directly
+                    $executablePath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+                    Write-Debug-Message "[DEBUG] Compiled EXE detected, restarting EXE directly: $executablePath"
+                    Write-Host "  Note: For compiled executables, continuing with current PowerShell version..." -ForegroundColor Cyan
+                    Write-Host "  PowerShell 7 preference will be remembered for admin restart." -ForegroundColor Cyan
+                    # Don't restart, just continue execution with PS7 preference stored
+                } else {
+                    # For script files, restart with PowerShell 7
+                    Write-Debug-Message "[DEBUG] Attempting to start PowerShell 7 with arguments: -ExecutionPolicy Bypass -File '$scriptPath'"
+                    Start-Process "pwsh" -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Wait
+                    Write-Debug-Message "[DEBUG] PowerShell 7 restart successful, exiting current session"
+                    exit
+                }
             } catch {
                 Write-Debug-Message "[DEBUG] PowerShell 7 restart failed: $($_.Exception.Message)"
-                Write-Host "  Failed to restart with PowerShell 7. Continuing with Windows PowerShell 5.1..." -ForegroundColor Yellow
+                Write-Host "  Failed to restart with PowerShell 7. Continuing with current PowerShell version..." -ForegroundColor Yellow
             }
         } else {
             Write-Debug-Message "[DEBUG] User chose to continue with Windows PowerShell 5.1"
@@ -190,8 +243,24 @@ if ($PSVersionTable.PSVersion.Major -lt 6) {
         Write-Host "  After installation, run: pwsh.exe -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor Cyan
         Write-Host ""
         
-        # Ask if user wants to open the download page
-        $openDownload = Read-Host "  Open PowerShell 7 download page in browser? (y/n)"
+        # Check if we're running as compiled EXE to determine input method
+        $scriptPath = $MyInvocation.MyCommand.Path
+        $isCompiledEXE = ($null -eq $scriptPath) -or ($scriptPath -like "*.exe")
+        
+        if ($isCompiledEXE) {
+            # For compiled EXE, use Windows Forms dialog
+            Add-Type -AssemblyName System.Windows.Forms
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                "PowerShell 7 is recommended for better compatibility.`n`nWould you like to open the download page in your browser?",
+                "PowerShell 7 Download",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            $openDownload = if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { "y" } else { "n" }
+        } else {
+            # For script files, use Read-Host
+            $openDownload = Read-Host "  Open PowerShell 7 download page in browser? (y/n)"
+        }
         if ($openDownload -match "^[Yy]") {
             try {
                 Start-Process "https://github.com/PowerShell/PowerShell/releases/latest"
@@ -225,6 +294,13 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 
 Write-Debug-Message "[DEBUG] Administrator privileges: $(if($isAdmin) { 'Present' } else { 'Missing' })"
 
+# Also check current user and process info for debugging
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$processInfo = [System.Diagnostics.Process]::GetCurrentProcess()
+Write-Debug-Message "[DEBUG] Current user: $currentUser"
+Write-Debug-Message "[DEBUG] Process name: $($processInfo.ProcessName)"
+Write-Debug-Message "[DEBUG] Process path: $($processInfo.MainModule.FileName)"
+
 if (-not $isAdmin) {
     Write-Debug-Message "[DEBUG] Administrator privileges required, attempting elevation..."
     Write-Host ""
@@ -237,8 +313,51 @@ if (-not $isAdmin) {
         $scriptPath = $MyInvocation.MyCommand.Path
         Write-Debug-Message "[DEBUG] Current script path: $scriptPath"
         
-        # If running as a script file
-        if ($scriptPath) {
+        # Detect if we're running as a compiled EXE
+        $isCompiledEXE = ($null -eq $scriptPath) -or ($scriptPath -like "*.exe")
+        Write-Debug-Message "[DEBUG] Is compiled EXE: $isCompiledEXE"
+        
+        if ($isCompiledEXE) {
+            # For compiled EXE, check if user wants PowerShell 7 and if it's available
+            if ($script:userWantsPS7) {
+                # Check if PowerShell 7 is available and if the original script exists
+                $pwshAvailable = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+                $scriptDir = Split-Path $executablePath -Parent
+                $originalScript = Join-Path $scriptDir "access_rstudio_gui.ps1"
+                
+                if ($pwshAvailable -and (Test-Path $originalScript)) {
+                    Write-Host "  User requested PowerShell 7 - restarting with PowerShell 7..." -ForegroundColor Green
+                    Write-Debug-Message "[DEBUG] Restarting with PowerShell 7: $($pwshAvailable.Source)"
+                    Write-Debug-Message "[DEBUG] Using script: $originalScript"
+                    
+                    # Restart with PowerShell 7 using the original script
+                    Start-Process $pwshAvailable.Source -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -File `"$originalScript`" -ElevatedRestart -PS7Requested"
+                    exit
+                } else {
+                    Write-Host "  PowerShell 7 requested but not available or script not found." -ForegroundColor Yellow
+                    Write-Host "  Continuing with compiled executable..." -ForegroundColor Yellow
+                }
+            }
+            
+            # For compiled EXE, use the current process executable path
+            $executablePath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            Write-Debug-Message "[DEBUG] Compiled EXE path: $executablePath"
+            
+            Write-Host "  Restarting compiled executable with elevated privileges..." -ForegroundColor Cyan
+            Write-Host "  Please confirm the UAC prompt when it appears." -ForegroundColor Yellow
+            Write-Host ""
+            
+            # Add a pause to ensure user sees the message
+            Start-Sleep -Seconds 2
+            
+            # Check if user wanted PowerShell 7 and pass it as parameter
+            $ps7Args = if ($script:userWantsPS7) { "-ElevatedRestart -PS7Requested" } else { "-ElevatedRestart" }
+            Write-Debug-Message "[DEBUG] Elevation arguments: $ps7Args"
+            
+            # Restart the EXE with elevated privileges and parameters
+            Start-Process $executablePath -Verb RunAs -ArgumentList $ps7Args
+            exit
+        } elseif ($scriptPath) {
             Write-Debug-Message "[DEBUG] Running as script file, proceeding with elevation"
             # Use the current PowerShell executable for restart
             $currentPSExecutable = if ($PSVersionTable.PSVersion.Major -ge 6) { 
@@ -250,11 +369,11 @@ if (-not $isAdmin) {
             
             Write-Host "  Restarting with elevated privileges using: $currentPSExecutable" -ForegroundColor Cyan
             
-            # Restart with elevated privileges using the current PowerShell version
-            Start-Process $currentPSExecutable -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`" -STA" -Wait
+            # Restart with elevated privileges using the current PowerShell version and pass the parameter
+            Start-Process $currentPSExecutable -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`" -ElevatedRestart"
             exit
         } else {
-            # If running interactively or as a compiled exe
+            # If running interactively 
             Write-Host ""
             Write-Host "Please restart this application as Administrator."
             Write-Host ""
@@ -273,6 +392,15 @@ if (-not $isAdmin) {
     Write-Debug-Message "[DEBUG] Administrator privileges confirmed, continuing with script execution"
     Write-Host ""
     Write-Host "[SUCCESS] Running with Administrator privileges" -ForegroundColor Green
+    
+    # Additional check for compiled EXE to ensure we're running in the right context
+    $scriptPath = $MyInvocation.MyCommand.Path
+    $isCompiledEXE = ($null -eq $scriptPath) -or ($scriptPath -like "*.exe")
+    if ($isCompiledEXE) {
+        $executablePath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        Write-Debug-Message "[DEBUG] Running as elevated compiled EXE: $executablePath"
+        Write-Host "[INFO] Compiled executable running with administrator privileges" -ForegroundColor Cyan
+    }
     Write-Host ""
 }
 
@@ -4801,7 +4929,7 @@ $formContainer.Controls.Add($buttonCancel)
 
 # Add form closing event handler to check if container is running
 $formContainer.Add_FormClosing({
-    param($sender, $e)
+    param($formSender, $closeEventArgs)
     
     # Check if container is currently running before allowing close
     $currentlyRunning = $false
@@ -4829,7 +4957,7 @@ $formContainer.Add_FormClosing({
     
     # If container is running, show warning and cancel the close
     if ($currentlyRunning) {
-        $result = [System.Windows.Forms.MessageBox]::Show(
+        [void][System.Windows.Forms.MessageBox]::Show(
             "The container '$CONTAINER_NAME' is still RUNNING.`n`nPlease stop the container before closing!`n`nClick 'Stop Container' to stop it, then try closing again.",
             "Container Still Running",
             [System.Windows.Forms.MessageBoxButtons]::OK,
@@ -4837,7 +4965,7 @@ $formContainer.Add_FormClosing({
         )
         
         # Cancel the form closing event
-        $e.Cancel = $true
+        $closeEventArgs.Cancel = $true
         Write-Host "[WARNING] Form close cancelled - container '$CONTAINER_NAME' is still running" -ForegroundColor Yellow
     } else {
         Write-Host "[INFO] Container management form closing - no running containers detected" -ForegroundColor Cyan
