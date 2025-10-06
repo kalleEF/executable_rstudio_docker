@@ -3720,6 +3720,15 @@ function Get-GitRepositoryState {
                 return $null
             }
             
+            # Pull latest changes for safety
+            Write-Host "[INFO] Pulling latest changes to remote repository for safety..." -ForegroundColor Cyan
+            & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git pull" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
+            } else {
+                Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+            }
+            
             # Get current commit hash
             $currentCommit = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git rev-parse HEAD" 2>$null
             
@@ -3760,6 +3769,15 @@ function Get-GitRepositoryState {
             if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
                 Write-Host "[INFO] Not a git repository or git not available" -ForegroundColor Cyan
                 return $null
+            }
+            
+            # Pull latest changes for safety
+            Write-Host "[INFO] Pulling latest changes to local repository for safety..." -ForegroundColor Cyan
+            git pull 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
+            } else {
+                Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
             }
             
             # Get current commit hash
