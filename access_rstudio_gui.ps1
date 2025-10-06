@@ -4781,6 +4781,51 @@ $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
 }
 $formContainer.Controls.Add($buttonCancel)
 
+# Add form closing event handler to check if container is running
+$formContainer.Add_FormClosing({
+    param($sender, $e)
+    
+    # Check if container is currently running before allowing close
+    $currentlyRunning = $false
+    try {
+        Set-DockerSSHEnvironment
+        
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        } else {
+            $runningCheck = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        }
+        
+        if ($null -eq $runningCheck) {
+            $runningCheck = "this_container_does_not_exist"
+        }
+        
+        if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
+            $currentlyRunning = $true
+        }
+    } catch {
+        # If we can't check, assume it might be running to be safe
+        Write-Debug-Message "[DEBUG] Could not check container status during form close: $($_.Exception.Message)"
+        $currentlyRunning = $false
+    }
+    
+    # If container is running, show warning and cancel the close
+    if ($currentlyRunning) {
+        $result = [System.Windows.Forms.MessageBox]::Show(
+            "The container '$CONTAINER_NAME' is still RUNNING.`n`nPlease stop the container before closing!`n`nClick 'Stop Container' to stop it, then try closing again.",
+            "Container Still Running",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+        
+        # Cancel the form closing event
+        $e.Cancel = $true
+        Write-Host "[WARNING] Form close cancelled - container '$CONTAINER_NAME' is still running" -ForegroundColor Yellow
+    } else {
+        Write-Host "[INFO] Container management form closing - no running containers detected" -ForegroundColor Cyan
+    }
+})
+
 # Set default buttons
 $formContainer.AcceptButton = $buttonOK
 $formContainer.CancelButton = $buttonCancel
