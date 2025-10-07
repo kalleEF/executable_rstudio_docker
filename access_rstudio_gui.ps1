@@ -3902,6 +3902,14 @@ function Get-GitRepositoryState {
             # Pull latest changes for safety
             Write-Host "[INFO] Pulling latest changes to local repository for safety..." -ForegroundColor Cyan
             git pull 2>$null
+            
+            Write-Host "Waiting for git operations to complete... 3 seconds"
+            Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+            Write-Host "Waiting for git operations to complete... 2 seconds"
+            Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+            Write-Host "Waiting for git operations to complete... 1 seconds"
+            Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
             } else {
