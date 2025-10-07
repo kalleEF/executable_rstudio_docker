@@ -3825,7 +3825,10 @@ function Convert-PathToDockerFormat {
 
 # 4: Helper function to capture git repository state
 function Get-GitRepositoryState {
-    param([string]$RepoPath)
+    param(
+        [string]$RepoPath,
+        [switch]$Pull
+    )
     
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # Handle remote repository paths
@@ -3848,15 +3851,25 @@ function Get-GitRepositoryState {
                 return $null
             }
             
-            # Pull latest changes for safety
-            Write-Host "[INFO] Pulling latest changes to remote repository for safety..." -ForegroundColor Cyan
-            & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git pull" 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
-            } else {
-                Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+            if($Pull) {
+                # Pull latest changes for safety
+                Write-Host "[INFO] Pulling latest changes to remote repository for safety..." -ForegroundColor Cyan
+                & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git pull" 2>$null
+                
+                Write-Host "[INFO] Waiting for git operations to complete... 3 seconds" -ForegroundColor Cyan
+                Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+                Write-Host "[INFO] Waiting for git operations to complete... 2 seconds" -ForegroundColor Cyan
+                Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+                Write-Host "[INFO] Waiting for git operations to complete... 1 seconds" -ForegroundColor Cyan
+                Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+                
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
+                } else {
+                    Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+                }
             }
-            
+
             # Get current commit hash
             $currentCommit = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git rev-parse HEAD" 2>$null
             
@@ -3899,21 +3912,23 @@ function Get-GitRepositoryState {
                 return $null
             }
             
-            # Pull latest changes for safety
-            Write-Host "[INFO] Pulling latest changes to local repository for safety..." -ForegroundColor Cyan
-            git pull 2>$null
-            
-            Write-Host "[INFO] Waiting for git operations to complete... 3 seconds" -ForegroundColor Cyan
-            Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
-            Write-Host "[INFO] Waiting for git operations to complete... 2 seconds" -ForegroundColor Cyan
-            Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
-            Write-Host "[INFO] Waiting for git operations to complete... 1 seconds" -ForegroundColor Cyan
-            Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+            if($Pull) {
+                # Pull latest changes for safety
+                Write-Host "[INFO] Pulling latest changes to local repository for safety..." -ForegroundColor Cyan
+                git pull 2>$null
+                
+                Write-Host "[INFO] Waiting for git operations to complete... 3 seconds" -ForegroundColor Cyan
+                Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+                Write-Host "[INFO] Waiting for git operations to complete... 2 seconds" -ForegroundColor Cyan
+                Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
+                Write-Host "[INFO] Waiting for git operations to complete... 1 seconds" -ForegroundColor Cyan
+                Start-Sleep -Seconds 1 # Small delay to ensure git operations complete
 
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
-            } else {
-                Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
+                } else {
+                    Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+                }
             }
             
             # Get current commit hash
@@ -3957,7 +3972,7 @@ function Invoke-GitChangeDetection {
         return
     }
     
-    $currentState = Get-GitRepositoryState -RepoPath $RepoPath
+    $currentState = Get-GitRepositoryState -RepoPath $RepoPath -Pull
     if (-not $currentState) {
         Write-Host "[INFO] Could not get current git state - skipping change detection" -ForegroundColor Cyan
         return
@@ -5750,7 +5765,7 @@ $buttonStart.Add_Click({
     }
     
     if ($gitRepoPath) {
-        $script:gitStateBeforeContainer = Get-GitRepositoryState -RepoPath $gitRepoPath
+        $script:gitStateBeforeContainer = Get-GitRepositoryState -RepoPath $gitRepoPath -Pull
         $script:gitRepoPath = $gitRepoPath  # Store for later use in stop handler
     } else {
         $script:gitStateBeforeContainer = $null
