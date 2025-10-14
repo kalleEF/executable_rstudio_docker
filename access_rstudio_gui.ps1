@@ -6117,6 +6117,12 @@ RUN apk add --no-cache rsync
             # Working directory
             "--workdir", "/home/rstudio/$script:SelectedRepo"
         )
+        
+        # Add customParams if specified
+        if ($null -ne $customParams) {
+            $customParamsArray = $customParams -split '\s+'
+            $dockerArgs += $customParamsArray
+        }
 
         # Add final argument
         $dockerArgs += $DockerImageName
@@ -6284,6 +6290,12 @@ RUN apk add --no-cache rsync
                 # Working directory
                 "--workdir", "/home/rstudio/$script:SelectedRepo"
             )
+        }
+
+        # Add customParams if specified
+        if ($null -ne $customParams) {
+            $customParamsArray = $customParams -split '\s+'
+            $dockerArgs += $customParamsArray
         }
 
         # Add final argument (Docker image name)
