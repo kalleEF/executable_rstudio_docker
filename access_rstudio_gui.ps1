@@ -3611,6 +3611,8 @@ function Get-YamlPathValue {
         [string]$BaseDir # Pass ProjectRoot here (already uses forward slashes)
     )
     
+    Write-Debug-Message "[DEBUG] Resolving YAML key '$Key' from path '$YamlPath' (BaseDir: $BaseDir, Location: $CONTAINER_LOCATION)"
+    
     # Handle remote vs local YAML file reading
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to read the YAML file
@@ -3619,6 +3621,7 @@ function Get-YamlPathValue {
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
         Write-Host "[INFO] Reading remote YAML file: $YamlPath" -ForegroundColor Cyan
+        Write-Debug-Message "[DEBUG] Remote host: $remoteHost, SSH key: $sshKeyPath"
         
         # Use PowerShell job with timeout for YAML file reading
         $yamlReadJob = Start-Job -ScriptBlock {
@@ -3629,15 +3632,18 @@ function Get-YamlPathValue {
         if (Wait-Job $yamlReadJob -Timeout 15) {
             $yamlContent = Receive-Job $yamlReadJob
             Remove-Job $yamlReadJob
+            Write-Debug-Message "[DEBUG] Retrieved remote YAML content for '$Key' (length: $($yamlContent.Length))"
         } else {
             Remove-Job $yamlReadJob -Force
-            Write-Host "Warning: YAML file reading timed out after 15 seconds"
+            Write-Host "Warning: YAML file reading timed out after 15 seconds" 
             $yamlContent = $null
             $LASTEXITCODE = 1
+            Write-Debug-Message "[DEBUG] YAML remote read job timed out for path '$YamlPath'"
         }
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Warning: Could not read remote YAML file: $YamlPath"
+            Write-Debug-Message "[DEBUG] Unable to read remote YAML file '$YamlPath'; returning null"
             return $null
         }
         
@@ -3647,6 +3653,7 @@ function Get-YamlPathValue {
         # For local operations, use Select-String as before
         if (-not (Test-Path $YamlPath)) {
             Write-Host "Warning: Local YAML file not found: $YamlPath"
+            Write-Debug-Message "[DEBUG] Local YAML file '$YamlPath' not found on disk"
             return $null
         }
         $lineObj = Select-String -Path $YamlPath -Pattern "^$Key\s*:" | Select-Object -First 1
@@ -3661,6 +3668,7 @@ function Get-YamlPathValue {
         if ([System.IO.Path]::IsPathRooted($value) -or $value.StartsWith('/')) {
             $constructedPath = $value
             Write-Host "Path '$value' for key '$Key' is absolute."
+            Write-Debug-Message "[DEBUG] YAML value for '$Key' is absolute: $constructedPath"
         } else {
             # Construct path relative to the specified BaseDir (ProjectRoot)
             # Ensure BaseDir and value use consistent slashes for joining
@@ -3670,13 +3678,16 @@ function Get-YamlPathValue {
             # Clean up potential double slashes, except after protocol like C://
             $constructedPath = $constructedPath -replace '(?<!:)/{2,}', '/'
             Write-Host "Path '$value' for key '$Key' is relative. Constructed as '$constructedPath'."
+            Write-Debug-Message "[DEBUG] YAML value for '$Key' resolved relative to BaseDir: $constructedPath"
         }
 
         # Normalize to forward slashes for consistency before returning
         $normalizedPath = $constructedPath -replace '\\', '/'
+        Write-Debug-Message "[DEBUG] Returning normalized YAML path for '$Key': $normalizedPath"
         return $normalizedPath
     }
     Write-Host "Warning: No matching line found for key: $Key in '$YamlPath'"
+    Write-Debug-Message "[DEBUG] No matching YAML key '$Key' found in '$YamlPath'"
     return $null
 }
 
@@ -3686,8 +3697,10 @@ function Test-AndCreateDirectory {
         [string]$Path,
         [string]$PathKey # For logging purposes (e.g., "output_dir")
     )
+    Write-Debug-Message "[DEBUG] Validating path '$Path' for key '$PathKey' (Location: $CONTAINER_LOCATION)"
     if (-not $Path) {
         Write-Host "Error: Could not determine $PathKey path from YAML."
+        Write-Debug-Message "[DEBUG] Path resolution for '$PathKey' failed because value is null or empty"
         return $false
     }
 
@@ -3780,27 +3793,33 @@ function Test-AndCreateDirectory {
         # Local operations - use existing logic
         # Use native path format for Test-Path and New-Item
         $NativePath = $Path -replace '/', '\\'
+        Write-Debug-Message "[DEBUG] Evaluating local path '$NativePath' for key '$PathKey'"
 
         if (-not (Test-Path $NativePath)) {
             Write-Host "Warning: $PathKey path not found: $NativePath. Creating directory..."
             try {
                 New-Item -ItemType Directory -Path $NativePath -Force -ErrorAction Stop | Out-Null
                 Write-Host "Successfully created $PathKey directory: $NativePath"
+                Write-Debug-Message "[DEBUG] Created local directory '$NativePath' for key '$PathKey'"
                 return $true
             } catch {
                 Write-Host "Error: Failed to create $PathKey directory: $NativePath - $($_.Exception.Message)"
+                Write-Debug-Message "[DEBUG] Failed to create local directory '$NativePath': $($_.Exception.Message)"
                 # Attempt to resolve the path to see if it exists now, maybe a race condition or delay
                 if(Test-Path $NativePath) {
                      Write-Host "Info: Directory $NativePath seems to exist now despite previous error."
+                     Write-Debug-Message "[DEBUG] Directory '$NativePath' detected after creation error"
                      return $true
                 }
                 return $false
             }
         } elseif (-not (Get-Item $NativePath).PSIsContainer) {
             Write-Host "Error: The path specified for $PathKey exists but is a file, not a directory: $NativePath"
+            Write-Debug-Message "[DEBUG] Path '$NativePath' for key '$PathKey' exists but is not a directory"
             return $false
         } else {
              # Directory exists
+             Write-Debug-Message "[DEBUG] Local directory '$NativePath' already exists"
              return $true
         }
     }
@@ -3809,6 +3828,7 @@ function Test-AndCreateDirectory {
 # 3: Helper function to convert Windows path to Docker Desktop/WSL format
 function Convert-PathToDockerFormat {
     param([string]$Path)
+    Write-Debug-Message "[DEBUG] Converting path to Docker format: $Path"
     # Input example: P:/My_Models/IMPACTncd_Japan
     # Match drive letter (e.g., P) and the rest of the path
     if ($Path -match '^([A-Za-z]):/(.*)') {
@@ -3818,9 +3838,11 @@ function Convert-PathToDockerFormat {
         $dockerPath = "/$driveLetter/$restOfPath"
         # Remove trailing slash if present
         $dockerPath = $dockerPath -replace '/$', ''
+        Write-Debug-Message "[DEBUG] Docker-formatted path: $dockerPath"
         return $dockerPath
     } else {
         Write-Warning "Path '$Path' did not match expected Windows format (e.g., C:/path/to/dir)"
+        Write-Debug-Message "[DEBUG] Path '$Path' unchanged during Docker conversion"
         return $Path # Return original path if format is unexpected
     }
 }
@@ -3832,10 +3854,13 @@ function Get-GitRepositoryState {
         [switch]$Pull
     )
     
+    Write-Debug-Message "[DEBUG] Capturing git repository state for '$RepoPath' (Pull: $Pull, Location: $CONTAINER_LOCATION)"
+    
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # Handle remote repository paths
         if (-not $RepoPath) {
             Write-Host "[WARNING] No remote repository path provided" -ForegroundColor Yellow
+            Write-Debug-Message "[DEBUG] Remote repository state capture aborted: RepoPath was null or empty"
             return $null
         }
         
@@ -3844,10 +3869,13 @@ function Get-GitRepositoryState {
             $remoteHost = "php-workstation@$($script:RemoteHostIp)"
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             
+            Write-Debug-Message "[DEBUG] Remote git state query target: Host=$remoteHost, Key=$sshKeyPath"
+            
             Write-Host "[INFO] Checking remote git repository state: $RepoPath" -ForegroundColor Cyan
             
             # Check if this is a git repository
             $isGitRepo = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git rev-parse --is-inside-work-tree" 2>$null
+            Write-Debug-Message "[DEBUG] Remote git repo check result: $isGitRepo (ExitCode: $LASTEXITCODE)"
             if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
                 Write-Host "[INFO] Remote path is not a git repository or git not available" -ForegroundColor Cyan
                 return $null
@@ -3867,13 +3895,16 @@ function Get-GitRepositoryState {
                 
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
+                    Write-Debug-Message "[DEBUG] Remote git pull completed successfully for '$RepoPath'"
                 } else {
                     Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+                    Write-Debug-Message "[DEBUG] Remote git pull failed or no changes for '$RepoPath' (ExitCode: $LASTEXITCODE)"
                 }
             }
 
             # Get current commit hash
             $currentCommit = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git rev-parse HEAD" 2>$null
+            Write-Debug-Message "[DEBUG] Remote git commit hash: $currentCommit"
             
             # Get list of modified/added/deleted files
             $gitStatus = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git status --porcelain" 2>$null
@@ -3891,24 +3922,29 @@ function Get-GitRepositoryState {
             }
             
             Write-Host "[SUCCESS] Remote git repository state captured" -ForegroundColor Green
+            Write-Debug-Message "[DEBUG] Remote git state summary -> Modified: $($state.ModifiedFiles.Count), Untracked: $($state.UntrackedFiles.Count)"
             return $state
             
         } catch {
             Write-Host "[WARNING] Error capturing remote git repository state: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Debug-Message "[DEBUG] Exception during remote git state capture: $($_.Exception.Message)"
             return $null
         }
     } else {
         # Handle local repository paths
         if (-not (Test-Path $RepoPath)) {
             Write-Host "[WARNING] Repository path does not exist: $RepoPath" -ForegroundColor Yellow
+            Write-Debug-Message "[DEBUG] Local repository path '$RepoPath' not found"
             return $null
         }
         
         try {
             Push-Location $RepoPath
+            Write-Debug-Message "[DEBUG] Working directory switched to '$RepoPath'"
             
             # Check if this is a git repository
             $isGitRepo = git rev-parse --is-inside-work-tree 2>$null
+            Write-Debug-Message "[DEBUG] Local git repo check result: $isGitRepo (ExitCode: $LASTEXITCODE)"
             if ($LASTEXITCODE -ne 0 -or $isGitRepo -ne "true") {
                 Write-Host "[INFO] Not a git repository or git not available" -ForegroundColor Cyan
                 return $null
@@ -3928,13 +3964,16 @@ function Get-GitRepositoryState {
 
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "[SUCCESS] Successfully pulled latest changes" -ForegroundColor Green
+                    Write-Debug-Message "[DEBUG] Local git pull completed successfully for '$RepoPath'"
                 } else {
                     Write-Host "[WARNING] Git pull failed or no changes to pull" -ForegroundColor Yellow
+                    Write-Debug-Message "[DEBUG] Local git pull failed or no changes for '$RepoPath' (ExitCode: $LASTEXITCODE)"
                 }
             }
             
             # Get current commit hash
             $currentCommit = git rev-parse HEAD 2>$null
+            Write-Debug-Message "[DEBUG] Local git commit hash: $currentCommit"
             
             # Get list of modified/added/deleted files
             $gitStatus = git status --porcelain 2>$null
@@ -3952,13 +3991,16 @@ function Get-GitRepositoryState {
             }
             
             Write-Host "[INFO] Captured local git state: $($state.ModifiedFiles.Count) modified, $($state.UntrackedFiles.Count) untracked files" -ForegroundColor Green
+            Write-Debug-Message "[DEBUG] Local git state summary -> Modified: $($state.ModifiedFiles.Count), Untracked: $($state.UntrackedFiles.Count)"
             return $state
             
         } catch {
             Write-Host "[WARNING] Error capturing local git state: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Debug-Message "[DEBUG] Exception during local git state capture: $($_.Exception.Message)"
             return $null
         } finally {
             Pop-Location
+            Write-Debug-Message "[DEBUG] Restored original working directory after git state capture"
         }
     }
 }
@@ -3967,35 +4009,42 @@ function Get-GitRepositoryState {
 function Invoke-GitChangeDetection {
     param([string]$RepoPath)
     
+    Write-Debug-Message "[DEBUG] Starting git change detection for '$RepoPath' (Location: $CONTAINER_LOCATION)"
     Write-Host "[INFO] Checking for git changes after container execution..." -ForegroundColor Cyan
     
     if (-not $script:GitStateBeforeContainer) {
         Write-Host "[INFO] No git state was captured before container start - skipping change detection" -ForegroundColor Cyan
+        Write-Debug-Message "[DEBUG] Git change detection skipped: no baseline state available"
         return
     }
     
     $currentState = Get-GitRepositoryState -RepoPath $RepoPath -Pull
     if (-not $currentState) {
         Write-Host "[INFO] Could not get current git state - skipping change detection" -ForegroundColor Cyan
+        Write-Debug-Message "[DEBUG] Git change detection skipped: unable to retrieve current state"
         return
     }
     
     # Check if this is a remote repository
     $isRemote = $CONTAINER_LOCATION -like "REMOTE@*"
+    Write-Debug-Message "[DEBUG] Showing git commit dialog for '$RepoPath' (Remote: $isRemote)"
     
     try {
         if ($isRemote) {
             # Handle remote repository
             $remoteHost = "php-workstation@$($script:RemoteHostIp)"
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+            Write-Debug-Message "[DEBUG] Git change detection operating on remote host '$remoteHost'"
             
             # Get current status on remote
             $currentStatus = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git status --porcelain" 2>$null
             $currentFiles = ($currentStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+            Write-Debug-Message "[DEBUG] Remote git status entries detected: $($currentFiles.Count)"
             
             # Check if there are any changes
             if ($currentFiles.Count -eq 0) {
                 Write-Host "[INFO] No git changes detected after container execution" -ForegroundColor Green
+                Write-Debug-Message "[DEBUG] Remote git change detection found no modifications"
                 return
             }
             
@@ -4011,12 +4060,14 @@ function Invoke-GitChangeDetection {
             
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "[SUCCESS] Changes staged successfully on remote" -ForegroundColor Green
+                Write-Debug-Message "[DEBUG] Remote git staging succeeded for '$RepoPath'"
                 
                 # Show the commit dialog for remote repository
                 Show-GitCommitDialog -RepoPath $RepoPath
                 
             } else {
                 Write-Host "[ERROR] Failed to stage changes on remote" -ForegroundColor Red
+                Write-Debug-Message "[DEBUG] Remote git staging failed for '$RepoPath' (ExitCode: $LASTEXITCODE)"
             }
             
         } else {
@@ -4026,10 +4077,12 @@ function Invoke-GitChangeDetection {
             # Get current status
             $currentStatus = git status --porcelain 2>$null
             $currentFiles = ($currentStatus -split "`n" | Where-Object { $_.Trim() -ne "" })
+            Write-Debug-Message "[DEBUG] Local git status entries detected: $($currentFiles.Count)"
             
             # Check if there are any changes
             if ($currentFiles.Count -eq 0) {
                 Write-Host "[INFO] No git changes detected after container execution" -ForegroundColor Green
+                Write-Debug-Message "[DEBUG] Local git change detection found no modifications"
                 return
             }
             
@@ -4040,25 +4093,29 @@ function Invoke-GitChangeDetection {
             Write-Host ""
             
             # Stage all changes
-            Write-Host "[INFO] Staging all changes..." -ForegroundColor Cyan
-            git add -A 2>$null
+        Write-Host "[INFO] Staging all changes..." -ForegroundColor Cyan
+        git add -A 2>$null
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[SUCCESS] Changes staged successfully" -ForegroundColor Green
+            Write-Debug-Message "[DEBUG] Local git staging succeeded for '$RepoPath'"
             
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[SUCCESS] Changes staged successfully" -ForegroundColor Green
-                
-                # Show the commit dialog
-                Show-GitCommitDialog -RepoPath $RepoPath
-                
-            } else {
-                Write-Host "[ERROR] Failed to stage changes" -ForegroundColor Red
-            }
+            # Show the commit dialog
+            Show-GitCommitDialog -RepoPath $RepoPath
+            
+        } else {
+            Write-Host "[ERROR] Failed to stage changes" -ForegroundColor Red
+            Write-Debug-Message "[DEBUG] Local git staging failed for '$RepoPath' (ExitCode: $LASTEXITCODE)"
+        }
         }
         
     } catch {
         Write-Host "[ERROR] Error during git change detection: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Debug-Message "[DEBUG] Exception raised during git change detection: $($_.Exception.Message)"
     } finally {
         if (-not $isRemote) {
             Pop-Location
+            Write-Debug-Message "[DEBUG] Restored working directory after git change detection"
         }
     }
 }
@@ -4172,6 +4229,7 @@ function Show-GitCommitDialog {
     function Invoke-GitPush {
         param($RepoPath, $StatusLabel, $CommitForm)
         
+        Write-Debug-Message "[DEBUG] Initiating git push for '$RepoPath' (Remote: $isRemote)"
         try {
             if ($isRemote) {
                 # Handle remote repository operations
@@ -4186,6 +4244,7 @@ function Show-GitCommitDialog {
                 $remoteUrl = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "cd '$RepoPath' && git remote get-url origin" 2>$null
                 $isHttpsRepo = $remoteUrl -match "^https://"
                 $isSshRepo = $remoteUrl -match "^git@"
+                Write-Debug-Message "[DEBUG] Remote repository URL detected: $remoteUrl (HTTPS: $isHttpsRepo, SSH: $isSshRepo)"
                 
                 # Configure git authentication on remote host
                 if ($isSshRepo) {
@@ -4193,7 +4252,8 @@ function Show-GitCommitDialog {
                     Write-Host "[INFO] Configuring SSH agent on remote host..." -ForegroundColor Cyan
                     
                     # First check if SSH key exists on remote host
-                    $keyExists = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -f ~/.ssh/id_ed25519_$USERNAME && echo 'exists'" 2>$null
+                $keyExists = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost "test -f ~/.ssh/id_ed25519_$USERNAME && echo 'exists'" 2>$null
+                Write-Debug-Message "[DEBUG] Remote SSH key existence check returned: $keyExists"
                     
                     if ($keyExists -ne "exists") {
                         Write-Host "[WARNING] SSH key ~/.ssh/id_ed25519_$USERNAME not found on remote host" -ForegroundColor Yellow
@@ -4285,6 +4345,8 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
                 
                 $pushOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $pushCommand 2>&1
                 $pushExitCode = $LASTEXITCODE
+                $pushSummary = ($pushOutput -split "`r?`n" | Select-Object -First 3) -join " | "
+                Write-Debug-Message "[DEBUG] Remote git push (agent approach) exit code: $pushExitCode, output: $pushSummary"
                 
                 # If SSH agent approach failed, try direct SSH key approach
                 if ($pushExitCode -ne 0 -and ($pushOutput -match "ssh-add.*No such file|ssh-agent.*not found")) {
@@ -4293,6 +4355,8 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
                     $directPushCommand = "cd '$RepoPath' && GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' git push"
                     $pushOutput = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $directPushCommand 2>&1
                     $pushExitCode = $LASTEXITCODE
+                    $pushSummary = ($pushOutput -split "`r?`n" | Select-Object -First 3) -join " | "
+                    Write-Debug-Message "[DEBUG] Remote git push (direct key) exit code: $pushExitCode, output: $pushSummary"
                 }
                 $pushExitCode = $LASTEXITCODE
                 
@@ -4308,6 +4372,7 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
                 $remoteUrl = git remote get-url origin 2>$null
                 $isHttpsRepo = $remoteUrl -match "^https://"
                 $isSshRepo = $remoteUrl -match "^git@"
+                Write-Debug-Message "[DEBUG] Local repository URL detected: $remoteUrl (HTTPS: $isHttpsRepo, SSH: $isSshRepo)"
                 
                 # Configure git authentication based on repository type
                 if ($isSshRepo) {
@@ -4341,6 +4406,8 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
                 
                 $pushOutput = git push 2>&1
                 $pushExitCode = $LASTEXITCODE
+                $pushSummary = ($pushOutput -split "`r?`n" | Select-Object -First 3) -join " | "
+                Write-Debug-Message "[DEBUG] Local git push exit code: $pushExitCode, output: $pushSummary"
                 
                 # Clean up environment variables
                 if ($isHttpsRepo) {
@@ -4357,12 +4424,14 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
                 $StatusLabel.ForeColor = [System.Drawing.Color]::DarkGreen
                 $CommitForm.Refresh()
                 Start-Sleep -Seconds 2
+                Write-Debug-Message "[DEBUG] Git push completed successfully for '$RepoPath'"
                 $CommitForm.Close()
                 return $true
             } else {
                 # Parse the error to provide more helpful feedback
                 $errorMessage = $pushOutput -join "`n"
                 Write-Host "[GIT PUSH ERROR] $errorMessage" -ForegroundColor Red
+                Write-Debug-Message "[DEBUG] Git push failed for '$RepoPath' with exit code $pushExitCode"
                 
                 # Provide specific error guidance based on error patterns
                 if ($errorMessage -match "git-credential-manager-core was renamed") {
@@ -4436,10 +4505,12 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
         } catch {
             $StatusLabel.Text = "Status: Push error - $($_.Exception.Message)"
             $StatusLabel.ForeColor = [System.Drawing.Color]::Red
+            Write-Debug-Message "[DEBUG] Exception during Invoke-GitPush: $($_.Exception.Message)"
             return $false
         } finally {
             if (-not $isRemote) {
                 Pop-Location
+                Write-Debug-Message "[DEBUG] Restored working directory after Invoke-GitPush"
             }
         }
     }
@@ -5013,6 +5084,8 @@ function Update-InstructionText {
         [string]$VolumesInfo = ""
     )
     
+    Write-Debug-Message "[DEBUG] Updating instruction text (Status=$Status, Location=$Location, Volumes=$VolumesInfo)"
+
     # Clear existing content
     $labelInstruction.Clear()
     
