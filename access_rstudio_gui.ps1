@@ -1,4 +1,4 @@
-﻿<#
+<#
  PowerShell GUI Launcher for RStudio Containers
  ---------------------------------------------
  This script prompts for username and password, then connects over SSH
@@ -32,9 +32,9 @@ param(
 )
 
 # Global debug flag - controls visibility of debug messages
-$script:DEBUG_MODE = $false
-$script:USE_DIRECT_SSH_FOR_DOCKER = $false  # Flag for Docker context SSH limitations
-$script:userWantsPS7 = $false  # Flag to track PowerShell 7 preference for elevation
+$script:DebugMode = $false
+$script:UseDirectSshForDocker = $false  # Flag for Docker context SSH limitations
+$script:UserWantsPS7 = $false  # Flag to track PowerShell 7 preference for elevation
 
 # Debug write function that respects the global debug flag
 function Write-Debug-Message {
@@ -42,7 +42,7 @@ function Write-Debug-Message {
         [string]$Message,
         [string]$ForegroundColor = "Magenta"
     )
-    if ($script:DEBUG_MODE) {
+    if ($script:DebugMode) {
         Write-Host $Message -ForegroundColor $ForegroundColor
     }
 }
@@ -54,8 +54,9 @@ function Set-FormCenterOnCurrentScreen {
     )
     
     try {
-        # Add necessary Windows API types
-        Add-Type -TypeDefinition @"
+        # Add necessary Windows API types once
+        if (-not ("Win32" -as [type])) {
+            Add-Type -TypeDefinition @"
         using System;
         using System.Runtime.InteropServices;
         using System.Drawing;
@@ -91,6 +92,7 @@ function Set-FormCenterOnCurrentScreen {
             public uint dwFlags;
         }
 "@
+        }
         
         # Get cursor position
         $cursorPos = New-Object POINT
@@ -188,7 +190,7 @@ if ($PSVersionTable.PSVersion.Major -lt 6 -and -not $ElevatedRestart) {
             Write-Host "  Restarting with PowerShell 7..." -ForegroundColor Green
             
             # Store the PS7 preference for later use
-            $script:userWantsPS7 = $true
+            $script:UserWantsPS7 = $true
             
             try {
                 # Detect if we're running as a compiled EXE and get the correct path
@@ -227,10 +229,10 @@ if ($PSVersionTable.PSVersion.Major -lt 6 -and -not $ElevatedRestart) {
         Write-Host "  we recommend installing PowerShell 7 (the modern, cross-platform version)." -ForegroundColor White
         Write-Host ""
         Write-Host "  Benefits of PowerShell 7:" -ForegroundColor Cyan
-        Write-Host "  • Better module compatibility" -ForegroundColor White
-        Write-Host "  • Improved performance" -ForegroundColor White
-        Write-Host "  • Enhanced error handling" -ForegroundColor White
-        Write-Host "  • Regular updates and security patches" -ForegroundColor White
+        Write-Host "  ? Better module compatibility" -ForegroundColor White
+        Write-Host "  ? Improved performance" -ForegroundColor White
+        Write-Host "  ? Enhanced error handling" -ForegroundColor White
+        Write-Host "  ? Regular updates and security patches" -ForegroundColor White
         Write-Host ""
         Write-Host "  Download PowerShell 7:" -ForegroundColor Green
         Write-Host "  https://github.com/PowerShell/PowerShell/releases/latest" -ForegroundColor Blue
@@ -319,7 +321,7 @@ if (-not $isAdmin) {
         
         if ($isCompiledEXE) {
             # For compiled EXE, check if user wants PowerShell 7 and if it's available
-            if ($script:userWantsPS7) {
+            if ($script:UserWantsPS7) {
                 # Check if PowerShell 7 is available and if the original script exists
                 $pwshAvailable = Get-Command pwsh.exe -ErrorAction SilentlyContinue
                 $scriptDir = Split-Path $executablePath -Parent
@@ -351,7 +353,7 @@ if (-not $isAdmin) {
             Start-Sleep -Seconds 2
             
             # Check if user wanted PowerShell 7 and pass it as parameter
-            $ps7Args = if ($script:userWantsPS7) { "-ElevatedRestart -PS7Requested" } else { "-ElevatedRestart" }
+            $ps7Args = if ($script:UserWantsPS7) { "-ElevatedRestart -PS7Requested" } else { "-ElevatedRestart" }
             Write-Debug-Message "[DEBUG] Elevation arguments: $ps7Args"
             
             # Restart the EXE with elevated privileges and parameters
@@ -875,7 +877,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 
         # Instruction label with better formatting and spacing
         $labelKeyInstruction = New-Object System.Windows.Forms.Label -Property @{ 
-            Text = "To enable GitHub integration, copy this SSH public key to your GitHub account:`n`nGitHub → Settings → SSH and GPG keys → New SSH key"
+            Text = "To enable GitHub integration, copy this SSH public key to your GitHub account:`n`nGitHub ? Settings ? SSH and GPG keys ? New SSH key"
             Location = New-Object System.Drawing.Point(20,60)
             Size = New-Object System.Drawing.Size(760,60)
             Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 10, [System.Drawing.FontStyle]::Regular)
@@ -924,29 +926,29 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
                 $buttonCopyKey.Enabled = $false
                 
                 # Re-enable button after 2 seconds with proper error handling
-                $script:copyTimer = New-Object System.Windows.Forms.Timer
-                $script:copyTimer.Interval = 2000
-                $script:copyTimer.Add_Tick({
+                $script:CopyTimer = New-Object System.Windows.Forms.Timer
+                $script:CopyTimer.Interval = 2000
+                $script:CopyTimer.Add_Tick({
                     try {
                         if ($buttonCopyKey -and -not $buttonCopyKey.IsDisposed) {
                             $buttonCopyKey.Text = 'Copy to Clipboard'
                             $buttonCopyKey.BackColor = [System.Drawing.Color]::LightGreen
                             $buttonCopyKey.Enabled = $true
                         }
-                        if ($script:copyTimer -and -not $script:copyTimer.Disposed) {
-                            $script:copyTimer.Stop()
-                            $script:copyTimer.Dispose()
-                            $script:copyTimer = $null
+                        if ($script:CopyTimer -and -not $script:CopyTimer.Disposed) {
+                            $script:CopyTimer.Stop()
+                            $script:CopyTimer.Dispose()
+                            $script:CopyTimer = $null
                         }
                     } catch {
                         # Silently handle any timer cleanup errors
-                        if ($script:copyTimer) {
-                            try { $script:copyTimer.Dispose() } catch { }
-                            $script:copyTimer = $null
+                        if ($script:CopyTimer) {
+                            try { $script:CopyTimer.Dispose() } catch { }
+                            $script:CopyTimer = $null
                         }
                     }
                 })
-                $script:copyTimer.Start()
+                $script:CopyTimer.Start()
             } catch {
                 [System.Windows.Forms.MessageBox]::Show('Failed to copy to clipboard. Please select all text and copy manually using Ctrl+C.', 'Copy Failed', 'OK', 'Warning') | Out-Null
             }
@@ -1135,9 +1137,9 @@ $formConnection.Controls.Add($checkBoxDebug)
 # Add click handlers for the buttons
 $buttonLocal.Add_Click({
     Write-Debug-Message "[DEBUG] User selected local container option"
-    $script:DEBUG_MODE = $checkBoxDebug.Checked
-    Write-Debug-Message "[DEBUG] Debug mode setting: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })"
-    Write-Host "[INFO] Debug mode: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
+    $script:DebugMode = $checkBoxDebug.Checked
+    Write-Debug-Message "[DEBUG] Debug mode setting: $(if($script:DebugMode) { 'Enabled' } else { 'Disabled' })"
+    Write-Host "[INFO] Debug mode: $(if($script:DebugMode) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "================================================"
     Write-Host "  LOCAL CONTAINER SELECTED"
@@ -1156,9 +1158,9 @@ $buttonLocal.Add_Click({
 
 $buttonRemote.Add_Click({
     Write-Debug-Message "[DEBUG] User selected remote container option"
-    $script:DEBUG_MODE = $checkBoxDebug.Checked
-    Write-Debug-Message "[DEBUG] Debug mode setting: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })"
-    Write-Host "[INFO] Debug mode: $(if($script:DEBUG_MODE) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
+    $script:DebugMode = $checkBoxDebug.Checked
+    Write-Debug-Message "[DEBUG] Debug mode setting: $(if($script:DebugMode) { 'Enabled' } else { 'Disabled' })"
+    Write-Host "[INFO] Debug mode: $(if($script:DebugMode) { 'Enabled' } else { 'Disabled' })" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "================================================"
     Write-Host "  REMOTE CONTAINER SELECTED"
@@ -1262,7 +1264,7 @@ $buttonRemote.Add_Click({
 
             # Extract IP address from remote host string
             $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-            $script:REMOTE_HOST_IP = $remoteIP
+            $script:RemoteHostIp = $remoteIP
             
         } else {
             Write-Debug-Message "[DEBUG] SSH key authentication failed, password authentication required"
@@ -2049,7 +2051,7 @@ echo "SCRIPT_END"
                                     
                                     # Extract IP address from remote host string
                                     $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-                                    $script:REMOTE_HOST_IP = $remoteIP
+                                    $script:RemoteHostIp = $remoteIP
                                     
                                     Write-Host "[SUCCESS] Remote SSH setup completed successfully!" -ForegroundColor Green
                                     Write-Host "  Host: $remoteHost"
@@ -2074,7 +2076,7 @@ echo "SCRIPT_END"
                                     
                                     # Still set up the IP for remote operations, but note authentication status
                                     $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-                                    $script:REMOTE_HOST_IP = $remoteIP
+                                    $script:RemoteHostIp = $remoteIP
                                     
                                     Write-Host "  [INFO] Remote host configured for password-based operations" -ForegroundColor Cyan
                                     Write-Host "  Host: $remoteHost"
@@ -2101,13 +2103,13 @@ echo "SCRIPT_END"
                         
                         # Still set IP address for potential manual setup
                         $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-                        $script:REMOTE_HOST_IP = $remoteIP
+                        $script:RemoteHostIp = $remoteIP
                     }
                     
                     # Extract IP address and continue (for successful key copy cases)
-                    if (-not $script:REMOTE_HOST_IP) {
+                    if (-not $script:RemoteHostIp) {
                         $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-                        $script:REMOTE_HOST_IP = $remoteIP
+                        $script:RemoteHostIp = $remoteIP
                     }
                     
                     # Secure cleanup: Clear the credential object from memory
@@ -2159,7 +2161,7 @@ echo "SCRIPT_END"
             
             # Extract IP address from remote host string
             $remoteIP = if ($remoteHost -match "@(.+)$") { $matches[1] } else { $remoteHost }
-            $script:REMOTE_HOST_IP = $remoteIP
+            $script:RemoteHostIp = $remoteIP
         }
     } catch {
         Write-Host ""
@@ -2192,28 +2194,28 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
     Write-Host ""
     Write-Host "========================================="
     Write-Host ""
-} elseif ($connectionResult -eq [System.Windows.Forms.DialogResult]::No -and $script:REMOTE_HOST_IP) {
-    Write-Debug-Message "[DEBUG] Processing remote container selection for IP: $($script:REMOTE_HOST_IP)"
-    $CONTAINER_LOCATION = "REMOTE@$($script:REMOTE_HOST_IP)"
+} elseif ($connectionResult -eq [System.Windows.Forms.DialogResult]::No -and $script:RemoteHostIp) {
+    Write-Debug-Message "[DEBUG] Processing remote container selection for IP: $($script:RemoteHostIp)"
+    $CONTAINER_LOCATION = "REMOTE@$($script:RemoteHostIp)"
     Write-Host "[SUCCESS] Container location configured" -ForegroundColor Green
     Write-Host "  Location: REMOTE"
-    Write-Host "  Target: $($script:REMOTE_HOST_IP)"
+    Write-Host "  Target: $($script:RemoteHostIp)"
     Write-Host "  Mode: Remote Docker containers via SSH"
     Write-Host ""
     
     # Set up global SSH environment for all remote Docker operations
-    $script:sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-    $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+    $script:SshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+    $env:DOCKER_SSH_OPTS = "-i `"$script:SshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
     Write-Debug-Message "[DEBUG] Configuring global SSH environment for Docker operations"
-    Write-Debug-Message "[DEBUG] SSH Key Path: $script:sshKeyPath"
+    Write-Debug-Message "[DEBUG] SSH Key Path: $script:SshKeyPath"
     Write-Debug-Message "[DEBUG] SSH Options: $env:DOCKER_SSH_OPTS"
     Write-Host "[INFO] Global SSH environment configured for Docker operations" -ForegroundColor Cyan
-    Write-Host "  SSH Key: $script:sshKeyPath" -ForegroundColor Cyan
+    Write-Host "  SSH Key: $script:SshKeyPath" -ForegroundColor Cyan
     Write-Host "  SSH Options: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
     Write-Host ""
 } else {
     Write-Debug-Message "[DEBUG] Container location configuration failed"
-    Write-Debug-Message "[DEBUG] Connection result: $connectionResult, Remote IP: $($script:REMOTE_HOST_IP)"
+    Write-Debug-Message "[DEBUG] Connection result: $connectionResult, Remote IP: $($script:RemoteHostIp)"
     Write-Host ""
     Write-Host "[ERROR] Configuration failed" -ForegroundColor Red
     Write-Host "  Reason: Remote connection failed or user cancelled"
@@ -2228,7 +2230,7 @@ if ($connectionResult -eq [System.Windows.Forms.DialogResult]::Yes) {
 
 Write-Debug-Message "[DEBUG] STEP 4.1.2: Starting remote repository scanning..."
 
-if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
+if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
     Write-Debug-Message "[DEBUG] Container location confirmed as remote: $CONTAINER_LOCATION"
     Write-Host ""
     Write-Host "========================================="
@@ -2241,7 +2243,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     # Define the base path on remote host where repositories are stored
     $remoteRepoPath = "/home/php-workstation/Schreibtisch/IMPACT/Models"
     Write-Debug-Message "[DEBUG] Remote repository base path: $remoteRepoPath"
-    #$remoteHost = "php_workstation@$($script:REMOTE_HOST_IP)" TODO: CHECK IF NEEDED
+    #$remoteHost = "php_workstation@$($script:RemoteHostIp)" TODO: CHECK IF NEEDED
     
     try {
         Write-Debug-Message "[DEBUG] Starting remote directory scan process"
@@ -2256,8 +2258,8 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         if ([string]::IsNullOrEmpty($remoteHost)) {
             Write-Debug-Message "[DEBUG] Remote host variable empty, reconstructing from stored IP"
             # Reconstruct the remote host from the IP we stored earlier
-            if ($script:REMOTE_HOST_IP) {
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            if ($script:RemoteHostIp) {
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 Write-Debug-Message "[DEBUG] Reconstructed remote host: $remoteHost"
                 Write-Host ""
                 Write-Host "    [INFO] Reconstructed remote host: $remoteHost" -ForegroundColor Cyan
@@ -2436,7 +2438,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     # Add click handler for OK button
     $buttonRepoOK.Add_Click({
         if ($listBoxRepos.SelectedIndex -ge 0) {
-            $script:SELECTED_REPO = $listBoxRepos.SelectedItem
+            $script:SelectedRepo = $listBoxRepos.SelectedItem
             $formRepoSelection.DialogResult = [System.Windows.Forms.DialogResult]::OK
             $formRepoSelection.Close()
         } else {
@@ -2451,10 +2453,10 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
 
     # Process the selection
     if ($repoSelectionResult -eq [System.Windows.Forms.DialogResult]::OK) {
-        Write-Debug-Message "[DEBUG] User selected repository: $($script:SELECTED_REPO)"
+        Write-Debug-Message "[DEBUG] User selected repository: $($script:SelectedRepo)"
         Write-Host ""
-        Write-Host "    [SUCCESS] Selected repository: $($script:SELECTED_REPO)" -ForegroundColor Green
-        Write-Host "    Repository path: $remoteRepoPath/$($script:SELECTED_REPO)"
+        Write-Host "    [SUCCESS] Selected repository: $($script:SelectedRepo)" -ForegroundColor Green
+        Write-Host "    Repository path: $remoteRepoPath/$($script:SelectedRepo)"
         Write-Host ""
         
         # Verify the selected repository exists and contains a Git repository
@@ -2462,8 +2464,8 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
         
         # Ensure we're using the correct remote host for verification
         if ([string]::IsNullOrEmpty($remoteHost)) {
-            if ($script:REMOTE_HOST_IP) {
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            if ($script:RemoteHostIp) {
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 Write-Host ""
                 Write-Host "    [INFO] Using remote host: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
@@ -2474,7 +2476,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
             }
         }
         
-        $gitCheckCommand = "test -d '$remoteRepoPath/$($script:SELECTED_REPO)/.git' && echo 'Git repository found' || echo 'No Git repository'"
+        $gitCheckCommand = "test -d '$remoteRepoPath/$($script:SelectedRepo)/.git' && echo 'Git repository found' || echo 'No Git repository'"
         
         # Use job with timeout for git check to prevent hanging
         Write-Host "    [INFO] Checking for .git directory in selected repository..." -ForegroundColor Cyan
@@ -2531,12 +2533,12 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     
     Write-Host "    [INFO] Setting up Docker context for remote execution..." -ForegroundColor Cyan
     Write-Host "    Remote host: $remoteHost"
-    Write-Host "    Selected repository: $($script:SELECTED_REPO)"
-    Write-Host "    Remote repository path: $remoteRepoPath/$($script:SELECTED_REPO)"
+    Write-Host "    Selected repository: $($script:SelectedRepo)"
+    Write-Host "    Remote repository path: $remoteRepoPath/$($script:SelectedRepo)"
     Write-Host ""
 
     # Store the full remote path for later use
-    $script:REMOTE_REPO_PATH = "$remoteRepoPath/$($script:SELECTED_REPO)"
+    $script:RemoteRepoPath = "$remoteRepoPath/$($script:SelectedRepo)"
     
     # Verify Docker is available on remote host
     Write-Host ""
@@ -2545,8 +2547,8 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     try {
         # Ensure we have the correct remote host for Docker verification
         if ([string]::IsNullOrEmpty($remoteHost)) {
-            if ($script:REMOTE_HOST_IP) {
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            if ($script:RemoteHostIp) {
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 Write-Host ""
                 Write-Host "    [INFO] Using remote host for Docker verification: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
@@ -2820,12 +2822,12 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:REMOTE_HOST_IP)") {
     Write-Host ""
 
     $RemoteContextName = "php_workstation"  # Name for the Docker context
-    $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Store globally for later use
+    $script:RemoteContextName = $RemoteContextName  # Store globally for later use
 
     # Ensure we have the correct remote host for Docker context
     if ([string]::IsNullOrEmpty($remoteHost)) {
-        if ($script:REMOTE_HOST_IP) {
-            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+        if ($script:RemoteHostIp) {
+            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
             Write-Host ""
             Write-Host "    [INFO] Using remote host for Docker context: $remoteHost" -ForegroundColor Cyan
             Write-Host ""
@@ -2970,7 +2972,7 @@ Host docker-$sshHostname
                 Write-Host "    [ERROR] Could not remove existing context even with force" -ForegroundColor Red
                 Write-Host "    [INFO] Will attempt to create with different name..." -ForegroundColor Cyan
                 $RemoteContextName = "php_workstation_new"  # Use different name as fallback
-                $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Update global variable
+                $script:RemoteContextName = $RemoteContextName  # Update global variable
                 $exists = $false
             }
         }
@@ -3003,7 +3005,7 @@ Host docker-$sshHostname
             
         if ($LASTEXITCODE -eq 0) {
             Write-Host "    [SUCCESS] Docker context created successfully" -ForegroundColor Green
-            $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Update global variable
+            $script:RemoteContextName = $RemoteContextName  # Update global variable
         } else {
             Write-Host "    [ERROR] Failed to create Docker context with SSH config alias" -ForegroundColor Red
             Write-Host "    [INFO] Falling back to direct SSH host..." -ForegroundColor Cyan
@@ -3016,7 +3018,7 @@ Host docker-$sshHostname
                 
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "    [SUCCESS] Docker context created with direct SSH" -ForegroundColor Green
-                $script:REMOTE_CONTEXT_NAME = $RemoteContextName  # Update global variable
+                $script:RemoteContextName = $RemoteContextName  # Update global variable
             } else {
                 Write-Host "    [ERROR] Failed to create Docker context" -ForegroundColor Red
             }
@@ -3081,7 +3083,7 @@ Host docker-$sshHostname
         Write-Host "    [INFO] This does not affect container functionality - continuing..." -ForegroundColor Cyan
         
         # Store that we'll need to use direct SSH for Docker operations
-        $script:USE_DIRECT_SSH_FOR_DOCKER = $true
+        $script:UseDirectSshForDocker = $true
     }
     } else {
         Write-Host "    [ERROR] Docker not accessible via SSH" -ForegroundColor Red
@@ -3107,7 +3109,7 @@ Host docker-$sshHostname
     Write-Host ""
     
     # Important note about Docker context SSH limitations
-    if ($script:USE_DIRECT_SSH_FOR_DOCKER) {
+    if ($script:UseDirectSshForDocker) {
         Write-Host "    [INFO] Note: Docker context has SSH key authentication limitations" -ForegroundColor Cyan
         Write-Host "    [INFO] Container operations will use direct SSH commands instead" -ForegroundColor Cyan
         Write-Host "    [INFO] This provides the same functionality with better authentication" -ForegroundColor Cyan
@@ -3160,13 +3162,13 @@ Host docker-$sshHostname
         }
         
         # Store the full local path
-        $script:LOCAL_REPO_PATH = $selectedPath
+        $script:LocalRepoPath = $selectedPath
         
         # Extract the repository name (last folder in the path)
-        $script:SELECTED_REPO = Split-Path $selectedPath -Leaf
+        $script:SelectedRepo = Split-Path $selectedPath -Leaf
         
-        Write-Host "    [SUCCESS] Local repository path: $($script:LOCAL_REPO_PATH)" -ForegroundColor Green
-        Write-Host "    [SUCCESS] Repository name: $($script:SELECTED_REPO)" -ForegroundColor Green
+        Write-Host "    [SUCCESS] Local repository path: $($script:LocalRepoPath)" -ForegroundColor Green
+        Write-Host "    [SUCCESS] Repository name: $($script:SelectedRepo)" -ForegroundColor Green
         Write-Host ""
         
         # Check if the selected folder contains a Git repository
@@ -3214,8 +3216,8 @@ Host docker-$sshHostname
     Write-Host ""
     
     Write-Host "    [INFO] Setting up Docker context for local execution..." -ForegroundColor Cyan
-    Write-Host "    Selected repository: $($script:SELECTED_REPO)"
-    Write-Host "    Local repository path: $($script:LOCAL_REPO_PATH)"
+    Write-Host "    Selected repository: $($script:SelectedRepo)"
+    Write-Host "    Local repository path: $($script:LocalRepoPath)"
     Write-Host ""
     
     # Verify Docker is available locally
@@ -3487,16 +3489,16 @@ function Set-DockerSSHEnvironment {
     Write-Debug-Message "[DEBUG] Setting up Docker SSH environment..."
     if ($CONTAINER_LOCATION -like "REMOTE@*" -and (-not $env:DOCKER_SSH_OPTS -or [string]::IsNullOrEmpty($env:DOCKER_SSH_OPTS))) {
         Write-Debug-Message "[DEBUG] Remote container detected, SSH environment needs setup"
-        if ($script:sshKeyPath) {
-            $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
-            Write-Debug-Message "[DEBUG] SSH environment restored from cached key path: $script:sshKeyPath"
+        if ($script:SshKeyPath) {
+            $env:DOCKER_SSH_OPTS = "-i `"$script:SshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+            Write-Debug-Message "[DEBUG] SSH environment restored from cached key path: $script:SshKeyPath"
             Write-Host "[INFO] Restored SSH environment for Docker operations: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
         } else {
             # Fallback - reconstruct from USERNAME
-            $script:sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
-            $env:DOCKER_SSH_OPTS = "-i `"$script:sshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
+            $script:SshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
+            $env:DOCKER_SSH_OPTS = "-i `"$script:SshKeyPath`" -o IdentitiesOnly=yes -o ConnectTimeout=30"
             Write-Debug-Message "[DEBUG] SSH environment reconstructed from USERNAME: $USERNAME"
-            Write-Debug-Message "[DEBUG] Reconstructed key path: $script:sshKeyPath"
+            Write-Debug-Message "[DEBUG] Reconstructed key path: $script:SshKeyPath"
             Write-Host "[INFO] Reconstructed SSH environment for Docker operations: $env:DOCKER_SSH_OPTS" -ForegroundColor Cyan
         }
     } else {
@@ -3613,7 +3615,7 @@ function Get-YamlPathValue {
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to read the YAML file
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
         Write-Host "[INFO] Reading remote YAML file: $YamlPath" -ForegroundColor Cyan
@@ -3692,7 +3694,7 @@ function Test-AndCreateDirectory {
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to check and create directories
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
         # Use Unix path format for remote operations (no conversion needed)
@@ -3839,7 +3841,7 @@ function Get-GitRepositoryState {
         
         try {
             Set-DockerSSHEnvironment
-            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             
             Write-Host "[INFO] Checking remote git repository state: $RepoPath" -ForegroundColor Cyan
@@ -3967,7 +3969,7 @@ function Invoke-GitChangeDetection {
     
     Write-Host "[INFO] Checking for git changes after container execution..." -ForegroundColor Cyan
     
-    if (-not $script:gitStateBeforeContainer) {
+    if (-not $script:GitStateBeforeContainer) {
         Write-Host "[INFO] No git state was captured before container start - skipping change detection" -ForegroundColor Cyan
         return
     }
@@ -3984,7 +3986,7 @@ function Invoke-GitChangeDetection {
     try {
         if ($isRemote) {
             # Handle remote repository
-            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             
             # Get current status on remote
@@ -4173,7 +4175,7 @@ function Show-GitCommitDialog {
         try {
             if ($isRemote) {
                 # Handle remote repository operations
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 
                 $StatusLabel.Text = "Status: Pushing to remote repository..."
@@ -4462,7 +4464,7 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
         try {
             if ($isRemote) {
                 # Handle remote repository commit
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 
                 # Commit the changes on remote
@@ -4587,7 +4589,7 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
 }
 
 # Set repository/model and user-specific name for Docker container
-$CONTAINER_NAME = "$($script:SELECTED_REPO)_$USERNAME"
+$CONTAINER_NAME = "$($script:SelectedRepo)_$USERNAME"
 Write-Debug-Message "[DEBUG] Container name set to: $CONTAINER_NAME"
 
 # Check for existing containers with the username
@@ -4612,9 +4614,9 @@ try {
         Write-Debug-Message "[DEBUG] Checking local Docker containers for user: $USERNAME"
         $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
     } else {
-        Write-Debug-Message "[DEBUG] Checking remote Docker containers using context: $script:REMOTE_CONTEXT_NAME"
+        Write-Debug-Message "[DEBUG] Checking remote Docker containers using context: $script:RemoteContextName"
         # For remote, use the context we set up
-        $existingContainers = & docker --context $script:REMOTE_CONTEXT_NAME ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+        $existingContainers = & docker --context $script:RemoteContextName ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
     }
     
     Write-Debug-Message "[DEBUG] Docker ps command exit code: $LASTEXITCODE"
@@ -4652,7 +4654,7 @@ try {
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 $runningContainers = & docker ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
             } else {
-                $runningContainers = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
+                $runningContainers = & docker --context $script:RemoteContextName ps --filter "name=_$USERNAME" --format "{{.Names}}" 2>$null
             }
             $runningList = $runningContainers -split "`n" | Where-Object { $_ -match "_$USERNAME" -and $_.Trim() -ne "" }
             
@@ -4699,7 +4701,7 @@ try {
                             if ($CONTAINER_LOCATION -eq "LOCAL") {
                                 & docker stop $runningContainer 2>$null
                             } else {
-                                & docker --context $script:REMOTE_CONTEXT_NAME stop $runningContainer 2>$null
+                                & docker --context $script:RemoteContextName stop $runningContainer 2>$null
                             }
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host "    [SUCCESS] Stopped: $runningContainer" -ForegroundColor Green
@@ -4754,7 +4756,7 @@ Write-Host ""
 
 Write-Host "[INFO] Preparing container management interface..." -ForegroundColor Cyan
 Write-Host "  Container Name: $CONTAINER_NAME"
-Write-Host "  Selected Repository: $($script:SELECTED_REPO)"
+Write-Host "  Selected Repository: $($script:SelectedRepo)"
 Write-Host "  Username: $USERNAME"
 Write-Host ""
 
@@ -4767,7 +4769,7 @@ try {
     if ($CONTAINER_LOCATION -eq "LOCAL") {
         $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     } else {
-        $runningCheck = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        $runningCheck = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     }
     if ($null -eq $runningCheck) {
         $runningCheck = "this_container_does_not_exist" # Default to non-matching string
@@ -4825,7 +4827,7 @@ $labelInstruction.AppendText("$PASSWORD`n`n")
 $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 $labelInstruction.AppendText("The repository you are using is: ")
 $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
-$labelInstruction.AppendText("$($script:SELECTED_REPO)`n")
+$labelInstruction.AppendText("$($script:SelectedRepo)`n")
 
 $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 $labelInstruction.AppendText("The name of the container will be: ")
@@ -4952,7 +4954,11 @@ $formContainer.Controls.Add($buttonCancel)
 
 # Add form closing event handler to check if container is running
 $formContainer.Add_FormClosing({
-    param($formSender, $closeEventArgs)
+    param(
+        [object]$sender,
+        [System.Windows.Forms.FormClosingEventArgs]$formClosingEventArgs
+    )
+    [void]$sender
     
     # Check if container is currently running before allowing close
     $currentlyRunning = $false
@@ -4962,7 +4968,7 @@ $formContainer.Add_FormClosing({
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
         } else {
-            $runningCheck = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+            $runningCheck = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
         }
         
         if ($null -eq $runningCheck) {
@@ -4988,7 +4994,7 @@ $formContainer.Add_FormClosing({
         )
         
         # Cancel the form closing event
-        $closeEventArgs.Cancel = $true
+        $formClosingEventArgs.Cancel = $true
         Write-Host "[WARNING] Form close cancelled - container '$CONTAINER_NAME' is still running" -ForegroundColor Yellow
     } else {
         Write-Host "[INFO] Container management form closing - no running containers detected" -ForegroundColor Cyan
@@ -5011,34 +5017,37 @@ function Update-InstructionText {
     $labelInstruction.Clear()
     
     # Add formatted text to instruction rich textbox
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $boldFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $regularFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+
+    $labelInstruction.SelectionFont = $boldFont
     $labelInstruction.AppendText("Your username is: ")
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.SelectionFont = $regularFont
     $labelInstruction.AppendText("$USERNAME`n`n")
     
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.SelectionFont = $boldFont
     $labelInstruction.AppendText("The Rstudio Server username is: ")
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.SelectionFont = $regularFont
     $labelInstruction.AppendText("rstudio`n")
     
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.SelectionFont = $boldFont
     $labelInstruction.AppendText("Your Rstudio Server password is: ")
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.SelectionFont = $regularFont
     $labelInstruction.AppendText("$PASSWORD`n`n")
     
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.SelectionFont = $boldFont
     $labelInstruction.AppendText("The repository you are using is: ")
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
-    $labelInstruction.AppendText("$($script:SELECTED_REPO)`n")
+    $labelInstruction.SelectionFont = $regularFont
+    $labelInstruction.AppendText("$($script:SelectedRepo)`n")
     
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.SelectionFont = $boldFont
     $labelInstruction.AppendText("The name of the container will be: ")
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+    $labelInstruction.SelectionFont = $regularFont
     $labelInstruction.AppendText("$CONTAINER_NAME`n`n")
     
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.SelectionFont = $boldFont
     $labelInstruction.AppendText("Status: ")
-    $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+    $labelInstruction.SelectionFont = $boldFont
     if ($Status -eq "RUNNING") {
         $labelInstruction.SelectionColor = [System.Drawing.Color]::Green
         $labelInstruction.AppendText("RUNNING")
@@ -5050,30 +5059,30 @@ function Update-InstructionText {
     # Add location and volumes info if provided
     if ($Location) {
         $labelInstruction.SelectionColor = [System.Drawing.Color]::Black
-        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        $labelInstruction.SelectionFont = $boldFont
         $labelInstruction.AppendText(" Location: ")
-        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.SelectionFont = $regularFont
         $labelInstruction.AppendText($Location)
     }
     
     if ($VolumesInfo) {
         $labelInstruction.SelectionColor = [System.Drawing.Color]::Black
-        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        $labelInstruction.SelectionFont = $boldFont
         $labelInstruction.AppendText(" Volumes: ")
-        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.SelectionFont = $regularFont
         $labelInstruction.AppendText($VolumesInfo)
     }
 }
 
 # Declare variables at form scope so both event handlers can access them
-$script:useVolumes = $false
-$script:outputDir = $null
-$script:synthpopDir = $null
+$script:UseVolumes = $false
+$script:OutputDir = $null
+$script:SynthpopDir = $null
 $script:VolumeOutput = $null
 $script:VolumeSynthpop = $null
 $script:UserId = $null
 $script:GroupId = $null
-$script:rsyncImage = $null
+$script:RsyncImage = $null
 
 # Event handlers
 $buttonStart.Add_Click({
@@ -5082,10 +5091,10 @@ $buttonStart.Add_Click({
     Write-Host "  Container: $CONTAINER_NAME"
     
     # Get options from form and store in script scope
-    $script:useVolumes = $checkBoxVolumes.Checked
-    $useVolumes = $script:useVolumes  # Keep local copy for backwards compatibility
-    $script:rebuildImage = $checkBoxRebuild.Checked
-    $rebuildImage = $script:rebuildImage  # Keep local copy for backwards compatibility
+    $script:UseVolumes = $checkBoxVolumes.Checked
+    $useVolumes = $script:UseVolumes  # Keep local copy for backwards compatibility
+    $script:RebuildImage = $checkBoxRebuild.Checked
+    $rebuildImage = $script:RebuildImage  # Keep local copy for backwards compatibility
     $portOverride = $textBoxPort.Text.Trim()
     $customParams = $textBoxParams.Text.Trim()
     $SimDesignYAML = $textBoxSimDesign.Text.Trim()
@@ -5100,13 +5109,13 @@ $buttonStart.Add_Click({
 
     # Resolve docker setup directory based on current model
     if ($CONTAINER_LOCATION -eq "LOCAL") {
-        if (-not $script:LOCAL_REPO_PATH) {
+        if (-not $script:LocalRepoPath) {
             Write-Host "[FATAL ERROR] No local repository path found. Please restart the application and select a folder."
             Exit 1
         }
-        $ScriptDir = "$script:LOCAL_REPO_PATH\docker_setup"
-        $ProjectRoot = $script:LOCAL_REPO_PATH
-        Write-Host "[INFO] Using local repository path: $script:LOCAL_REPO_PATH" -ForegroundColor Cyan
+        $ScriptDir = "$script:LocalRepoPath\docker_setup"
+        $ProjectRoot = $script:LocalRepoPath
+        Write-Host "[INFO] Using local repository path: $script:LocalRepoPath" -ForegroundColor Cyan
         
         # Validate that the docker_setup directory exists locally
         if (-not (Test-Path $ScriptDir)) {
@@ -5115,13 +5124,13 @@ $buttonStart.Add_Click({
         }
     } else {
         # Remote operation
-        if (-not $script:REMOTE_REPO_PATH) {
+        if (-not $script:RemoteRepoPath) {
             Write-Host "[FATAL ERROR] No remote repository path found. Please restart the application and select a repository."
             Exit 1
         }
-        $ScriptDir = "$script:REMOTE_REPO_PATH/docker_setup"
-        $ProjectRoot = $script:REMOTE_REPO_PATH
-        Write-Host "[INFO] Using remote repository path: $script:REMOTE_REPO_PATH" -ForegroundColor Cyan
+        $ScriptDir = "$script:RemoteRepoPath/docker_setup"
+        $ProjectRoot = $script:RemoteRepoPath
+        Write-Host "[INFO] Using remote repository path: $script:RemoteRepoPath" -ForegroundColor Cyan
         
         # For remote, we'll validate paths during Docker build, not here with Test-Path
         Write-Host "[INFO] Remote docker_setup directory: $ScriptDir" -ForegroundColor Cyan
@@ -5175,7 +5184,7 @@ $buttonStart.Add_Click({
     Write-Host ""
 
     # Check if Docker image for the current model already exists
-    $DockerImageName = $script:SELECTED_REPO.ToLower()
+    $DockerImageName = $script:SelectedRepo.ToLower()
     Write-Host "[INFO] Checking if a Docker image for your repo (e.g. $DockerImageName) already exists..." -ForegroundColor Cyan
     Write-Host ""
 
@@ -5194,8 +5203,8 @@ $buttonStart.Add_Click({
             } else {
                 # Check on remote host using Docker context
                 Set-DockerSSHEnvironment
-                Write-Host "[INFO] Checking for Docker image on remote host using context: $script:REMOTE_CONTEXT_NAME" -ForegroundColor Cyan
-                $imageCheck = & docker --context $script:REMOTE_CONTEXT_NAME images --format "{{.Repository}}" 2>$null | Where-Object { $_ -eq $DockerImageName }
+                Write-Host "[INFO] Checking for Docker image on remote host using context: $script:RemoteContextName" -ForegroundColor Cyan
+                $imageCheck = & docker --context $script:RemoteContextName images --format "{{.Repository}}" 2>$null | Where-Object { $_ -eq $DockerImageName }
                 $imageExists = $null -ne $imageCheck
                 
                 if ($imageExists) {
@@ -5223,11 +5232,11 @@ $buttonStart.Add_Click({
 
         # Determine Dockerfile path for model image build
         if ($CONTAINER_LOCATION -eq "LOCAL") {
-            $dockerfilePath = Join-Path $script:LOCAL_REPO_PATH "docker_setup\Dockerfile.IMPACTncdGER"
-            $dockerContextPath = $script:LOCAL_REPO_PATH
+            $dockerfilePath = Join-Path $script:LocalRepoPath "docker_setup\Dockerfile.IMPACTncdGER"
+            $dockerContextPath = $script:LocalRepoPath
         } else {
-            $dockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.IMPACTncdGER"
-            $dockerContextPath = $script:REMOTE_REPO_PATH
+            $dockerfilePath = "$script:RemoteRepoPath/docker_setup/Dockerfile.IMPACTncdGER"
+            $dockerContextPath = $script:RemoteRepoPath
         }
 
         Write-Host "[INFO] Using Dockerfile: $dockerfilePath" -ForegroundColor Cyan
@@ -5242,7 +5251,7 @@ $buttonStart.Add_Click({
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 $dockerfileExists = Test-Path $dockerfilePath
             } else {
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 $dockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -f '$dockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                 $dockerfileExists = $dockerfileCheck -match "EXISTS"
@@ -5339,7 +5348,7 @@ $buttonStart.Add_Click({
                 Write-Host ""
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
                 Write-Host ""
-                $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                 $buildCommand = "cd '$dockerContextPath' && docker buildx build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
                 Write-Host ""
 
@@ -5415,12 +5424,12 @@ $buttonStart.Add_Click({
 
                 # Determine prerequisite Dockerfile path and build context (this time docker_setup folder)
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
-                    $prereqDockerfilePath = Join-Path $script:LOCAL_REPO_PATH "docker_setup\Dockerfile.prerequisite.IMPACTncdGER"
-                    $prereqDockerContextPath = Join-Path $script:LOCAL_REPO_PATH "docker_setup"
+                    $prereqDockerfilePath = Join-Path $script:LocalRepoPath "docker_setup\Dockerfile.prerequisite.IMPACTncdGER"
+                    $prereqDockerContextPath = Join-Path $script:LocalRepoPath "docker_setup"
 
                 } else {
-                    $prereqDockerfilePath = "$script:REMOTE_REPO_PATH/docker_setup/Dockerfile.prerequisite.IMPACTncdGER"
-                    $prereqDockerContextPath = "$script:REMOTE_REPO_PATH/docker_setup"
+                    $prereqDockerfilePath = "$script:RemoteRepoPath/docker_setup/Dockerfile.prerequisite.IMPACTncdGER"
+                    $prereqDockerContextPath = "$script:RemoteRepoPath/docker_setup"
                 }
 
                 Write-Host "[INFO] Using prerequisite Dockerfile: $prereqDockerfilePath" -ForegroundColor Cyan
@@ -5432,7 +5441,7 @@ $buttonStart.Add_Click({
                     if ($CONTAINER_LOCATION -eq "LOCAL") {
                         $prereqDockerfileExists = Test-Path $prereqDockerfilePath
                     } else {
-                        $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                         $prereqDockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                         $prereqDockerfileExists = $prereqDockerfileCheck -match "EXISTS"
@@ -5514,7 +5523,7 @@ $buttonStart.Add_Click({
                         } else {
                             # Remote build of prerequisite with real-time output
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
-                            $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                             $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker buildx build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache --progress=plain . 2>&1"
 
                             # Execute remote prerequisite build with real-time output
@@ -5646,7 +5655,7 @@ $buttonStart.Add_Click({
                                 } else {
                                     # Remote build retry with real-time output
                                     Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
-                                    $remoteHost = "php-workstation@$($script:REMOTE_HOST_IP)"
+                                    $remoteHost = "php-workstation@$($script:RemoteHostIp)"
                                     $retryBuildCommand = "cd '$dockerContextPath' && docker buildx build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
 
                                     # Execute remote retry build with real-time output
@@ -5753,11 +5762,11 @@ $buttonStart.Add_Click({
     Write-Host "[INFO] Capturing git state for change detection..." -ForegroundColor Cyan
     
     # Determine which repository path to use for git operations
-    if ($CONTAINER_LOCATION -eq "LOCAL" -and $script:LOCAL_REPO_PATH) {
-        $gitRepoPath = $script:LOCAL_REPO_PATH
+    if ($CONTAINER_LOCATION -eq "LOCAL" -and $script:LocalRepoPath) {
+        $gitRepoPath = $script:LocalRepoPath
         Write-Host "[INFO] Using local repository path for git operations: $gitRepoPath" -ForegroundColor Cyan
-    } elseif ($CONTAINER_LOCATION -like "REMOTE@*" -and $script:REMOTE_REPO_PATH) {
-        $gitRepoPath = $script:REMOTE_REPO_PATH
+    } elseif ($CONTAINER_LOCATION -like "REMOTE@*" -and $script:RemoteRepoPath) {
+        $gitRepoPath = $script:RemoteRepoPath
         Write-Host "[INFO] Using remote repository path for git operations: $gitRepoPath" -ForegroundColor Cyan
     } else {
         Write-Host "[WARNING] No valid repository path found for git operations" -ForegroundColor Yellow
@@ -5765,11 +5774,11 @@ $buttonStart.Add_Click({
     }
     
     if ($gitRepoPath) {
-        $script:gitStateBeforeContainer = Get-GitRepositoryState -RepoPath $gitRepoPath -Pull
-        $script:gitRepoPath = $gitRepoPath  # Store for later use in stop handler
+        $script:GitStateBeforeContainer = Get-GitRepositoryState -RepoPath $gitRepoPath -Pull
+        $script:GitRepoPath = $gitRepoPath  # Store for later use in stop handler
     } else {
-        $script:gitStateBeforeContainer = $null
-        $script:gitRepoPath = $null
+        $script:GitStateBeforeContainer = $null
+        $script:GitRepoPath = $null
     }
     Write-Host ""
 
@@ -5806,12 +5815,12 @@ $buttonStart.Add_Click({
     # Call the function passing $ProjectRoot
     Write-Host ""
     Write-Host ""
-    $script:outputDir = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
-    $outputDir = $script:outputDir  # Keep local copy for backwards compatibility
+    $script:OutputDir = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "output_dir" -BaseDir $ProjectRoot
+    $outputDir = $script:OutputDir  # Keep local copy for backwards compatibility
     Write-Host ""
     Write-Host ""
-    $script:synthpopDir = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
-    $synthpopDir = $script:synthpopDir  # Keep local copy for backwards compatibility
+    $script:SynthpopDir = Get-YamlPathValue -YamlPath $SimDesignYaml -Key "synthpop_dir" -BaseDir $ProjectRoot
+    $synthpopDir = $script:SynthpopDir  # Keep local copy for backwards compatibility
     Write-Host ""
     Write-Host ""
 
@@ -5887,14 +5896,14 @@ $buttonStart.Add_Click({
         }
         
         # Build rsync-alpine image if it doesn't already exist.
-        $script:rsyncImage = "rsync-alpine"
-        $rsyncImage = $script:rsyncImage  # Keep local copy for backwards compatibility
+        $script:RsyncImage = "rsync-alpine"
+        $rsyncImage = $script:RsyncImage  # Keep local copy for backwards compatibility
         
         if ($CONTAINER_LOCATION -eq "LOCAL") {
             & docker image inspect $rsyncImage > $null 2>&1
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME image inspect $rsyncImage > $null 2>&1
+            & docker --context $script:RemoteContextName image inspect $rsyncImage > $null 2>&1
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[INFO] Building rsync-alpine image..." -ForegroundColor Cyan
@@ -5914,7 +5923,7 @@ RUN apk add --no-cache rsync
 FROM alpine:latest
 RUN apk add --no-cache rsync
 "@
-                $InlineDockerfile | & docker --context $script:REMOTE_CONTEXT_NAME build -t $rsyncImage -
+                $InlineDockerfile | & docker --context $script:RemoteContextName build -t $rsyncImage -
             }
         } else {
             Write-Host "[INFO] Using existing rsync-alpine image." -ForegroundColor Cyan
@@ -5933,8 +5942,8 @@ RUN apk add --no-cache rsync
             & docker volume rm $VolumeSynthpop -f 2>$null
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $VolumeOutput -f 2>$null
-            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $VolumeSynthpop -f 2>$null
+            & docker --context $script:RemoteContextName volume rm $VolumeOutput -f 2>$null
+            & docker --context $script:RemoteContextName volume rm $VolumeSynthpop -f 2>$null
         }
 
         # Create fresh Docker-managed volumes
@@ -5943,8 +5952,8 @@ RUN apk add --no-cache rsync
             & docker volume create $VolumeSynthpop | Out-Null
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME volume create $VolumeOutput | Out-Null
-            & docker --context $script:REMOTE_CONTEXT_NAME volume create $VolumeSynthpop | Out-Null
+            & docker --context $script:RemoteContextName volume create $VolumeOutput | Out-Null
+            & docker --context $script:RemoteContextName volume create $VolumeSynthpop | Out-Null
         }
 
         # Fix volume ownership and pre-populate volumes:
@@ -5959,10 +5968,10 @@ RUN apk add --no-cache rsync
             & docker run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
             Write-Debug-Message "[DEBUG] Local volume ownership set successfully"
         } else {
-            Write-Debug-Message "[DEBUG] Setting remote Docker volume ownership using context: $script:REMOTE_CONTEXT_NAME"
+            Write-Debug-Message "[DEBUG] Setting remote Docker volume ownership using context: $script:RemoteContextName"
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
-            & docker --context $script:REMOTE_CONTEXT_NAME run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+            & docker --context $script:RemoteContextName run --rm -v "${VolumeOutput}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
+            & docker --context $script:RemoteContextName run --rm -v "${VolumeSynthpop}:/volume" alpine sh -c "chown ${UserId}:${GroupId} /volume"
             Write-Debug-Message "[DEBUG] Remote volume ownership set successfully"
         }
         Write-Host ""
@@ -5977,7 +5986,7 @@ RUN apk add --no-cache rsync
             # For local Windows, convert paths for Docker
             $dockerOutputSource = Convert-PathToDockerFormat -Path $outputDir
             $dockerSynthpopSource = Convert-PathToDockerFormat -Path $synthpopDir
-            $script:REPO_PATH = $script:LOCAL_REPO_PATH
+            $script:RepoPath = $script:LocalRepoPath
             Write-Debug-Message "[DEBUG] Local Docker output source: $dockerOutputSource"
             Write-Debug-Message "[DEBUG] Local Docker synthpop source: $dockerSynthpopSource"
         } else {
@@ -5985,7 +5994,7 @@ RUN apk add --no-cache rsync
             # For remote Linux, use paths directly
             $dockerOutputSource = $outputDir
             $dockerSynthpopSource = $synthpopDir
-            $script:REPO_PATH = $script:REMOTE_REPO_PATH
+            $script:RepoPath = $script:RemoteRepoPath
             Write-Debug-Message "[DEBUG] Remote Docker output source: $dockerOutputSource"
             Write-Debug-Message "[DEBUG] Remote Docker synthpop source: $dockerSynthpopSource"
         }
@@ -5996,7 +6005,7 @@ RUN apk add --no-cache rsync
             & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+            & docker --context $script:RemoteContextName run --rm --user "${UserId}:${GroupId}" -v "${dockerOutputSource}:/source" -v "${VolumeOutput}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         }
         Write-Host "[INFO] Populating synthpop volume from source directory..." -ForegroundColor Cyan
         Write-Host ""
@@ -6004,7 +6013,7 @@ RUN apk add --no-cache rsync
             & docker run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
+            & docker --context $script:RemoteContextName run --rm --user "${UserId}:${GroupId}" -v "${dockerSynthpopSource}:/source" -v "${VolumeSynthpop}:/volume" alpine sh -c "cp -r /source/. /volume/ 2>/dev/null || cp -a /source/. /volume/ 2>/dev/null || true"
         }
 
         # Run the main container with volumes mounted.
@@ -6021,19 +6030,19 @@ RUN apk add --no-cache rsync
             "-e", "PASSWORD=$PASSWORD",
             "-e", "DISABLE_AUTH=false",
             # Repo sync settings to update container based on changes
-            "--mount", "type=bind,source=$script:REPO_PATH,target=/host-repo",
+            "--mount", "type=bind,source=$script:RepoPath,target=/host-repo",
             "-e", "REPO_SYNC_PATH=/host-repo",
             "-e", "SYNC_ENABLED=true",
             # Port mapping with override support
             "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
             # Directory mounts
-            "-v", "${VolumeOutput}:/home/rstudio/$script:SELECTED_REPO/outputs",
-            "-v", "${VolumeSynthpop}:/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
+            "-v", "${VolumeOutput}:/home/rstudio/$script:SelectedRepo/outputs",
+            "-v", "${VolumeSynthpop}:/home/rstudio/$script:SelectedRepo/inputs/synthpop",
             # SSH key and known_hosts for git access - use appropriate paths for execution location
             "--mount", "type=bind,source=${sshKeyPath},target=/keys/id_ed25519_${USERNAME},readonly",
             "--mount", "type=bind,source=${knownHostsPath},target=/etc/ssh/ssh_known_hosts,readonly",
             # Working directory
-            "--workdir", "/home/rstudio/$script:SELECTED_REPO"
+            "--workdir", "/home/rstudio/$script:SelectedRepo"
         )
 
         # Add final argument
@@ -6045,7 +6054,7 @@ RUN apk add --no-cache rsync
             & docker $dockerArgs
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME $dockerArgs
+            & docker --context $script:RemoteContextName $dockerArgs
         }
         Write-Host ""
         Write-Host ""
@@ -6063,7 +6072,7 @@ RUN apk add --no-cache rsync
                 $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             } else {
                 Set-DockerSSHEnvironment
-                $containerStatus = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+                $containerStatus = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             }
             if ($containerStatus) {
                 Write-Host "[SUCCESS] Container is running: $containerStatus" -ForegroundColor Green
@@ -6074,7 +6083,7 @@ RUN apk add --no-cache rsync
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
                     Write-Host "  URL: http://localhost:$(if($portOverride) { $portOverride } else { '8787' })"
                 } else {
-                    Write-Host "  URL: http://$($script:REMOTE_HOST_IP):$(if($portOverride) { $portOverride } else { '8787' })"
+                    Write-Host "  URL: http://$($script:RemoteHostIp):$(if($portOverride) { $portOverride } else { '8787' })"
                 }
                 Write-Host "  Username: rstudio"
                 Write-Host "  Password: $PASSWORD"
@@ -6098,7 +6107,7 @@ RUN apk add --no-cache rsync
                     $containerLogs = & docker logs $CONTAINER_NAME 2>&1
                 } else {
                     Set-DockerSSHEnvironment
-                    $containerLogs = & docker --context $script:REMOTE_CONTEXT_NAME logs $CONTAINER_NAME 2>&1
+                    $containerLogs = & docker --context $script:RemoteContextName logs $CONTAINER_NAME 2>&1
                 }
                 Write-Host "[ERROR] Container logs:" -ForegroundColor Red
                 Write-Host $containerLogs
@@ -6145,19 +6154,19 @@ RUN apk add --no-cache rsync
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
                 # Repo sync settings to update container based on changes
-                "--mount", "type=bind,source=$script:LOCAL_REPO_PATH,target=/host-repo",
+                "--mount", "type=bind,source=$script:LocalRepoPath,target=/host-repo",
                 "-e", "REPO_SYNC_PATH=/host-repo",
                 "-e", "SYNC_ENABLED=true",
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts
-                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SELECTED_REPO/outputs",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SelectedRepo/outputs",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SelectedRepo/inputs/synthpop",
                 # SSH key and known_hosts for git access (Windows paths)
                 "--mount", "type=bind,source=${sshKeyPath},target=/keys/id_ed25519_${USERNAME},readonly",
                 "--mount", "type=bind,source=${knownHostsPath},target=/etc/ssh/ssh_known_hosts,readonly",
                 # Working directory
-                "--workdir", "/home/rstudio/$script:SELECTED_REPO"
+                "--workdir", "/home/rstudio/$script:SelectedRepo"
             )
             
         } else {
@@ -6188,19 +6197,19 @@ RUN apk add --no-cache rsync
                 "-e", "PASSWORD=$PASSWORD",
                 "-e", "DISABLE_AUTH=false",
                 # Repo sync settings to update container based on changes
-                "--mount", "type=bind,source=$script:REMOTE_REPO_PATH,target=/host-repo",
+                "--mount", "type=bind,source=$script:RemoteRepoPath,target=/host-repo",
                 "-e", "REPO_SYNC_PATH=/host-repo",
                 "-e", "SYNC_ENABLED=true",
                 # Port mapping with override support
                 "-p", "$(if($portOverride) { $portOverride } else { '8787' }):8787",
                 # Directory mounts (Unix paths)
-                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SELECTED_REPO/outputs",
-                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SELECTED_REPO/inputs/synthpop",
+                "--mount", "type=bind,source=$DockerOutputDir,target=/home/rstudio/$script:SelectedRepo/outputs",
+                "--mount", "type=bind,source=$DockerSynthpopDir,target=/home/rstudio/$script:SelectedRepo/inputs/synthpop",
                 # SSH key and known_hosts for git access (Linux paths)
                 "--mount", "type=bind,source=${sshKeyPath},target=/keys/id_ed25519_${USERNAME},readonly",
                 "--mount", "type=bind,source=${knownHostsPath},target=/etc/ssh/ssh_known_hosts,readonly",
                 # Working directory
-                "--workdir", "/home/rstudio/$script:SELECTED_REPO"
+                "--workdir", "/home/rstudio/$script:SelectedRepo"
             )
         }
 
@@ -6215,7 +6224,7 @@ RUN apk add --no-cache rsync
             & docker $dockerArgs
         } else {
             Set-DockerSSHEnvironment
-            & docker --context $script:REMOTE_CONTEXT_NAME $dockerArgs
+            & docker --context $script:RemoteContextName $dockerArgs
         }
         Write-Host ""
         Write-Host ""
@@ -6235,7 +6244,7 @@ RUN apk add --no-cache rsync
                 $containerStatus = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             } else {
                 Set-DockerSSHEnvironment
-                $containerStatus = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
+                $containerStatus = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Status}}" 2>$null
             }
             if ($containerStatus) {
                 Write-Host "[SUCCESS] Container is running: $containerStatus" -ForegroundColor Green
@@ -6246,7 +6255,7 @@ RUN apk add --no-cache rsync
                 if ($CONTAINER_LOCATION -eq "LOCAL") {
                     Write-Host "  URL: http://localhost:$(if($portOverride) { $portOverride } else { '8787' })"
                 } else {
-                    Write-Host "  URL: http://$($script:REMOTE_HOST_IP):$(if($portOverride) { $portOverride } else { '8787' })"
+                    Write-Host "  URL: http://$($script:RemoteHostIp):$(if($portOverride) { $portOverride } else { '8787' })"
                 }
                 Write-Host "  Username: rstudio"
                 Write-Host "  Password: $PASSWORD"
@@ -6271,7 +6280,7 @@ RUN apk add --no-cache rsync
                     $containerLogs = & docker logs $CONTAINER_NAME 2>&1
                 } else {
                     Set-DockerSSHEnvironment
-                    $containerLogs = & docker --context $script:REMOTE_CONTEXT_NAME logs $CONTAINER_NAME 2>&1
+                    $containerLogs = & docker --context $script:RemoteContextName logs $CONTAINER_NAME 2>&1
                 }
                 Write-Host "[ERROR] Container logs:" -ForegroundColor Red
                 Write-Host $containerLogs
@@ -6304,7 +6313,7 @@ $buttonStop.Add_Click({
         $containerRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     } else {
         Set-DockerSSHEnvironment
-        $containerRunning = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        $containerRunning = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
     }
     Write-Host ""
     
@@ -6320,7 +6329,7 @@ $buttonStop.Add_Click({
                 & docker stop $CONTAINER_NAME 2>&1 | Out-Null
             } else {
                 Set-DockerSSHEnvironment
-                & docker --context $script:REMOTE_CONTEXT_NAME stop $CONTAINER_NAME 2>&1 | Out-Null
+                & docker --context $script:RemoteContextName stop $CONTAINER_NAME 2>&1 | Out-Null
             }
             
             if ($LASTEXITCODE -eq 0) {
@@ -6335,13 +6344,13 @@ $buttonStop.Add_Click({
                     $stillRunning = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 } else {
                     Set-DockerSSHEnvironment
-                    $stillRunning = & docker --context $script:REMOTE_CONTEXT_NAME ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+                    $stillRunning = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
                 }
                 if (-not $stillRunning -or $stillRunning.Trim() -ne $CONTAINER_NAME) {
                     Write-Host "[SUCCESS] Container confirmed stopped." -ForegroundColor Green
                     Write-Host ""
                     
-                    if ($script:useVolumes) {
+                    if ($script:UseVolumes) {
                         Write-Host ""
                         # After the container exits:
                         # Synchronize the output and synthpop volumes back to the local directories using rsync.
@@ -6351,23 +6360,23 @@ $buttonStop.Add_Click({
                         # Configure paths based on execution location
                         if ($CONTAINER_LOCATION -eq "LOCAL") {
                             # For local Windows, convert paths for Docker
-                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $script:outputDir
-                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $script:synthpopDir
+                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $script:OutputDir
+                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $script:SynthpopDir
                         } else {
                             # For remote Linux, use paths directly
-                            $dockerOutputBackup = $script:outputDir
-                            $dockerSynthpopBackup = $script:synthpopDir
+                            $dockerOutputBackup = $script:OutputDir
+                            $dockerSynthpopBackup = $script:SynthpopDir
                         }
                         
                         # Use ${} to delimit variable name before the colon and add permission flags
                         # Added --no-perms and --chmod=ugo=rwX to prevent permission issues on Windows
                         if ($CONTAINER_LOCATION -eq "LOCAL") {
-                            & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
-                            & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                            & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:RsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                            & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:RsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                         } else {
                             Set-DockerSSHEnvironment
-                            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
-                            & docker --context $script:REMOTE_CONTEXT_NAME run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                            & docker --context $script:RemoteContextName run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:RsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
+                            & docker --context $script:RemoteContextName run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:RsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/
                         }
                         Write-Host ""
 
@@ -6378,8 +6387,8 @@ $buttonStop.Add_Click({
                             & docker volume rm $script:VolumeSynthpop | Out-Null
                         } else {
                             Set-DockerSSHEnvironment
-                            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $script:VolumeOutput | Out-Null
-                            & docker --context $script:REMOTE_CONTEXT_NAME volume rm $script:VolumeSynthpop | Out-Null
+                            & docker --context $script:RemoteContextName volume rm $script:VolumeOutput | Out-Null
+                            & docker --context $script:RemoteContextName volume rm $script:VolumeSynthpop | Out-Null
                         }
                         Write-Host ""
                     }    
@@ -6387,7 +6396,7 @@ $buttonStop.Add_Click({
                     # Update UI state - container stopped successfully
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    Update-InstructionText -Status "STOPPED" -Location $CONTAINER_LOCATION -VolumesInfo $(if($script:useVolumes) { "Enabled" } else { "Disabled" })
+                    Update-InstructionText -Status "STOPPED" -Location $CONTAINER_LOCATION -VolumesInfo $(if($script:UseVolumes) { "Enabled" } else { "Disabled" })
                     
                     Write-Host ""
                     Write-Host "==============================================="
@@ -6403,8 +6412,8 @@ $buttonStop.Add_Click({
                     Write-Host ""
                     
                     # Check for git changes after container stops
-                    if ($script:gitRepoPath) {
-                        Invoke-GitChangeDetection -RepoPath $script:gitRepoPath
+                    if ($script:GitRepoPath) {
+                        Invoke-GitChangeDetection -RepoPath $script:GitRepoPath
                     }
                     
                 } else {
@@ -6426,23 +6435,23 @@ $buttonStop.Add_Click({
                     Write-Host ""
                     
                     # Handle volume cleanup for force stop too
-                    if ($script:useVolumes) {
+                    if ($script:UseVolumes) {
                         Write-Host ""
                         Write-Host "[INFO] Force stopped - performing volume sync and cleanup..." -ForegroundColor Cyan
                         Write-Host ""
                         
                         # Configure paths based on execution location
                         if ($CONTAINER_LOCATION -eq "LOCAL") {
-                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $script:outputDir
-                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $script:synthpopDir
+                            $dockerOutputBackup = Convert-PathToDockerFormat -Path $script:OutputDir
+                            $dockerSynthpopBackup = Convert-PathToDockerFormat -Path $script:SynthpopDir
                         } else {
-                            $dockerOutputBackup = $script:outputDir
-                            $dockerSynthpopBackup = $script:synthpopDir
+                            $dockerOutputBackup = $script:OutputDir
+                            $dockerSynthpopBackup = $script:SynthpopDir
                         }
                         
                         # Quick sync and cleanup
-                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
-                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:rsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
+                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeOutput):/volume" -v "${dockerOutputBackup}:/backup" $script:RsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
+                        & docker run --rm --user "$($script:UserId):$($script:GroupId)" -v "$($script:VolumeSynthpop):/volume" -v "${dockerSynthpopBackup}:/backup" $script:RsyncImage rsync -avc --no-owner --no-group --no-times --no-perms --chmod=ugo=rwX /volume/ /backup/ 2>$null
                         & docker volume rm $script:VolumeOutput $script:VolumeSynthpop -f 2>$null
                         Write-Host ""
                     }
@@ -6450,11 +6459,11 @@ $buttonStop.Add_Click({
                     # Update UI state
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
-                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
+                    $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SelectedRepo)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:UseVolumes) { 'Enabled' } else { 'Disabled' })"
                     
                     # Check for git changes after force stop
-                    if ($script:gitRepoPath) {
-                        Invoke-GitChangeDetection -RepoPath $script:gitRepoPath
+                    if ($script:GitRepoPath) {
+                        Invoke-GitChangeDetection -RepoPath $script:GitRepoPath
                     }
                 } else {
                     Write-Host ""
@@ -6479,7 +6488,7 @@ $buttonStop.Add_Click({
         # Container is already stopped - just update UI
         $buttonStart.Enabled = $true
         $buttonStop.Enabled = $false
-        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SELECTED_REPO)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:useVolumes) { 'Enabled' } else { 'Disabled' })"
+        $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SelectedRepo)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:UseVolumes) { 'Enabled' } else { 'Disabled' })"
         
         Write-Host "[INFO] UI updated to reflect stopped state" -ForegroundColor Cyan
         Write-Host ""
@@ -6527,6 +6536,7 @@ Logic:
     5. If no, we exit the script
     6. If no changes, we exit the script
 #>
+
 
 
 
