@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COMPILATION-README.md</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: #ffffff;
+            color: #333333;
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+            color: #1f2328;
+        }
+        
+        h1 {
+            font-size: 2em;
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 0.3em;
+        }
+        
+        h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 0.3em;
+        }
+        
+        h3 {
+            font-size: 1.25em;
+        }
+        
+        a {
+            color: #0969da;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        code {
+            background-color: #f6f8fa;
+            padding: 0.2em 0.4em;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 85%;
+        }
+        
+        pre {
+            background-color: #f6f8fa;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid #d0d7de;
+        }
+        
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
+            font-size: 100%;
+        }
+        
+        blockquote {
+            border-left: 4px solid #d0d7de;
+            padding-left: 16px;
+            margin-left: 0;
+            color: #333333;
+            opacity: 0.8;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        
+        table th,
+        table td {
+            padding: 8px 13px;
+            border: 1px solid #d0d7de;
+        }
+        
+        table th {
+            background-color: #f6f8fa;
+            font-weight: 600;
+        }
+        
+        table tr:nth-child(even) {
+            background-color: #f6f8fa;
+            opacity: 0.5;
+        }
+        
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        hr {
+            border: 0;
+            border-top: 1px solid #d0d7de;
+            margin: 24px 0;
+        }
+        
+        ul, ol {
+            padding-left: 2em;
+        }
+        
+        li {
+            margin: 0.25em 0;
+        }
+        
+        .toc {
+            background-color: #f6f8fa;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        
+        .toc h2 {
+            margin-top: 0;
+            border-bottom: none;
+        }
+        
+        @media print {
+            body {
+                max-width: 100%;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="content"></div>
+    
+    <script>
+        // Configure marked options
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            headerIds: true,
+            mangle: false
+        });
+        
+        // Markdown content
+        const markdown = `# IMPACT.exe Compilation Guide
+
+This folder contains all the necessary files and scripts to compile the PowerShell GUI script into a standalone executable.
+
+## Files Overview
+
+### Main Files
+- \`access_rstudio_gui.ps1\` - Main PowerShell script with Docker container management functionality
+- \`IMPACT.exe\` - Compiled executable (generated)
+
+### Icon Files
+- \`IMPACT_icon.png\` - Original PNG icon (1024x1024)
+- \`IMPACT_icon.ico\` - High-resolution ICO icon with multiple sizes (16x16 to 256x256)
+
+### Compilation Scripts
+- \`Compile-IMPACT.ps1\` - PowerShell compilation script with full options and verbose output
+- \`Compile-IMPACT.bat\` - Interactive batch file with detailed output and error handling
+- \`Quick-Compile.bat\` - Silent batch file for fast compilation with minimal output
+- \`Convert-PngToIco.ps1\` - Utility to convert PNG to high-resolution ICO
+
+## Quick Compilation
+
+### Method 1: Quick Batch File (Fastest)
+Double-click \`Quick-Compile.bat\` for silent compilation with minimal output.
+
+### Method 2: Interactive Batch File (Detailed)
+Double-click \`Compile-IMPACT.bat\` for full compilation details and error messages.
+
+### Method 3: PowerShell Script (Advanced)
+\`\`\`powershell
+.\\Compile-IMPACT.ps1 -Force
+\`\`\`
+
+### Method 4: Manual ps2exe (Expert)
+\`\`\`powershell
+Invoke-PS2EXE -InputFile .\\access_rstudio_gui.ps1 -OutputFile .\\IMPACT.exe -iconFile .\\IMPACT_icon.ico
+\`\`\`
+
+## Icon Management
+
+### Convert PNG to ICO
+If you update the PNG icon, run:
+\`\`\`powershell
+.\\Convert-PngToIco.ps1
+\`\`\`
+
+This creates a high-resolution ICO file with these sizes:
+- 16x16, 24x24, 32x32, 48x48, 64x64, 96x96, 128x128, 256x256
+
+## Compilation Features
+
+The compiled executable includes:
+- ✅ **Custom High-Resolution Icon** - Professional appearance in Windows
+- ✅ **Administrator Privilege Elevation** - Automatic UAC prompt handling
+- ✅ **Windows Forms GUI** - Rich dialog interfaces instead of console prompts
+- ✅ **PowerShell Version Detection** - Optimal PowerShell version handling
+- ✅ **Docker Container Management** - Full local and remote container support
+- ✅ **SSH Connection Handling** - Secure remote host connectivity
+- ✅ **Git Repository Integration** - Automatic change detection and commit prompts
+
+## Usage
+
+### Running the Executable
+1. **Right-click** \`IMPACT.exe\` and select **"Run as Administrator"**
+2. Or **double-click** to start with automatic elevation prompt
+
+### First Run Behavior
+1. Shows PowerShell version notice (if using Windows PowerShell 5.1)
+2. Requests administrator elevation via UAC prompt
+3. Proceeds to username/password dialog for container access
+
+## Troubleshooting
+
+### Icon Not Showing
+- Ensure \`IMPACT_icon.ico\` exists in the same folder as the script
+- Recompile using \`Compile-IMPACT.ps1 -Force\`
+
+### Compilation Errors
+- Check that ps2exe module is installed: \`Install-Module ps2exe -Scope CurrentUser\`
+- Ensure all files are in the same directory
+- Run PowerShell as Administrator if needed
+
+### Runtime Issues
+- The executable requires Administrator privileges for Docker operations
+- Windows may show security warnings for unsigned executables (normal behavior)
+
+## Requirements
+
+- **PowerShell 5.1+** (Windows PowerShell or PowerShell 7)
+- **ps2exe Module** - Automatically installed by compilation script
+- **Windows 10/11** - For optimal Windows Forms support
+- **Docker Desktop** - For container management functionality
+
+## Notes
+
+- The executable is self-contained and doesn't require PowerShell to be installed on target machines
+- All ps2exe compatibility fixes are included (Read-Host replacement, elevation handling, etc.)
+- The icon contains multiple resolutions for crisp display on different screen densities
+- Environment variable flags prevent double PowerShell version prompts during elevation`;
+        
+        // Convert and sanitize
+        const rawHtml = marked.parse(markdown);
+        const cleanHtml = DOMPurify.sanitize(rawHtml);
+        
+        // Insert into page
+        document.getElementById('content').innerHTML = cleanHtml;
+        
+        // Add copy buttons to code blocks
+        document.querySelectorAll('pre code').forEach((block) => {
+            const button = document.createElement('button');
+            button.innerText = 'Copy';
+            button.style.cssText = 'position: absolute; top: 5px; right: 5px; padding: 4px 8px; font-size: 12px; cursor: pointer;';
+            
+            const pre = block.parentElement;
+            pre.style.position = 'relative';
+            
+            button.addEventListener('click', () => {
+                navigator.clipboard.writeText(block.textContent);
+                button.innerText = 'Copied!';
+                setTimeout(() => { button.innerText = 'Copy'; }, 2000);
+            });
+            
+            pre.insertBefore(button, block);
+        });
+    </script>
+</body>
+</html>

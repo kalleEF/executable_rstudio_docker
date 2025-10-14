@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USER-MANUAL.md</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: #ffffff;
+            color: #333333;
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+            color: #1f2328;
+        }
+        
+        h1 {
+            font-size: 2em;
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 0.3em;
+        }
+        
+        h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 0.3em;
+        }
+        
+        h3 {
+            font-size: 1.25em;
+        }
+        
+        a {
+            color: #0969da;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        code {
+            background-color: #f6f8fa;
+            padding: 0.2em 0.4em;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 85%;
+        }
+        
+        pre {
+            background-color: #f6f8fa;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid #d0d7de;
+        }
+        
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
+            font-size: 100%;
+        }
+        
+        blockquote {
+            border-left: 4px solid #d0d7de;
+            padding-left: 16px;
+            margin-left: 0;
+            color: #333333;
+            opacity: 0.8;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        
+        table th,
+        table td {
+            padding: 8px 13px;
+            border: 1px solid #d0d7de;
+        }
+        
+        table th {
+            background-color: #f6f8fa;
+            font-weight: 600;
+        }
+        
+        table tr:nth-child(even) {
+            background-color: #f6f8fa;
+            opacity: 0.5;
+        }
+        
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        hr {
+            border: 0;
+            border-top: 1px solid #d0d7de;
+            margin: 24px 0;
+        }
+        
+        ul, ol {
+            padding-left: 2em;
+        }
+        
+        li {
+            margin: 0.25em 0;
+        }
+        
+        .toc {
+            background-color: #f6f8fa;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        
+        .toc h2 {
+            margin-top: 0;
+            border-bottom: none;
+        }
+        
+        @media print {
+            body {
+                max-width: 100%;
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="content"></div>
+    
+    <script>
+        // Configure marked options
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            headerIds: true,
+            mangle: false
+        });
+        
+        // Markdown content
+        const markdown = `# IMPACT Container Manager - User Manual
+
+## Table of Contents
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+- [System Requirements](#system-requirements)
+- [First Launch](#first-launch)
+- [Workflow Guide](#workflow-guide)
+- [Container Location Selection](#container-location-selection)
+- [Local Container Workflow](#local-container-workflow)
+- [Remote Container Workflow](#remote-container-workflow)
+- [Container Management](#container-management)
+- [Git Integration](#git-integration)
+- [Troubleshooting](#troubleshooting)
+- [Docker Configuration](#docker-configuration)
+- [Advanced Features](#advanced-features)
+- [FAQ](#faq)
+
+---
+
+## Overview
+
+**IMPACT Container Manager** is a user-friendly Windows application that simplifies the process of managing Docker containers for RStudio Server environments. The application provides a graphical interface to:
+
+- Launch and manage Docker containers locally or on remote workstations
+- Connect to RStudio Server instances running in containers
+- Manage Git repositories and track changes
+- Handle SSH authentication and key management
+- Monitor container status and logs
+
+The application is designed for researchers and analysts who need to work with simulation models in isolated, reproducible Docker environments.
+
+---
+
+## System Requirements
+
+### Minimum Requirements
+- **Operating System**: Windows 10 (version 1809 or later) or Windows 11
+- **PowerShell**: Windows PowerShell 5.1 or PowerShell 7+ (recommended)
+- **Memory**: 4 GB RAM minimum (8 GB recommended)
+- **Disk Space**: 500 MB for application and dependencies
+
+### Local Container Requirements
+- **Docker Desktop**: Version 4.0 or later
+- Docker Desktop must be running with WSL2 backend enabled
+- Administrator privileges for Docker operations
+
+### Remote Container Requirements
+- **SSH Access**: SSH client (built into Windows 10/11)
+- Remote workstation with Docker installed (Ubuntu 24.04 or compatible Linux)
+- Network connectivity to remote host
+- SSH key-based authentication
+
+---
+
+## Getting Started
+
+### Installation
+
+IMPACT.exe is a compiled PowerShell application that requires compilation from source before use.
+
+#### Compiling the Application
+
+1. **Obtain Source Files**: Clone or download the repository containing \`access_rstudio_gui.ps1\` and related files
+2. **Review Compilation Guide**: Open \`COMPILATION-README.md\` for detailed compilation instructions
+3. **Choose Compilation Method**:
+   - **Quick Method**: Double-click \`Quick-Compile.bat\` for silent compilation
+   - **Interactive Method**: Double-click \`Compile-IMPACT.bat\` for compilation with prompts
+   - **Manual Method**: Run \`.\\Compile-IMPACT.ps1\` in PowerShell for custom options
+
+4. **Compilation Process**:
+   \`\`\`powershell
+   # The compilation script will:
+   # - Check for ps2exe module (install if needed)
+   # - Validate icon file exists
+   # - Compile access_rstudio_gui.ps1 to IMPACT.exe
+   # - Include the IMPACT icon
+   # - Configure executable settings
+   \`\`\`
+
+5. **Output**: After successful compilation, \`IMPACT.exe\` will be created in the same directory
+6. **Optional**: Move \`IMPACT.exe\` to your preferred location or create a desktop shortcut
+
+> **Note**: The compilation process requires PowerShell and the ps2exe module. See \`COMPILATION-README.md\` for complete requirements and troubleshooting.
+
+### Running the Application
+
+#### Method 1: Double-Click (Recommended)
+Simply double-click \`IMPACT.exe\`. The application will automatically:
+- Request administrator privileges if needed
+- Display a UAC (User Account Control) prompt
+- Launch with elevated permissions
+
+#### Method 2: Run as Administrator
+Right-click \`IMPACT.exe\` and select **"Run as Administrator"**
+
+> **Note**: Administrator privileges are required for Docker operations and SSH key management.
+
+---
+
+## First Launch
+
+When you launch IMPACT.exe for the first time, you'll see:
+
+### 1. PowerShell Version Notice (if using PowerShell 5.1)
+\`\`\`
+[NOTICE] You're running Windows PowerShell 5.1
+PowerShell 7 is available on your system and provides better compatibility.
+
+Would you like to restart with PowerShell 7 now? (y/n)
+\`\`\`
+
+**Recommendation**: Click **Yes** to use PowerShell 7 for better compatibility.
+
+### 2. Administrator Elevation
+\`\`\`
+NOTICE: This script requires administrator privileges for Docker operations.
+Attempting to restart with elevated privileges...
+\`\`\`
+
+Confirm the UAC prompt to proceed with elevated permissions.
+
+### 3. User Credentials Dialog
+
+The first interactive dialog prompts for your credentials:
+
+\`\`\`
+┌─────────────────────────────────────────┐
+│  Enter User Credentials                 │
+├─────────────────────────────────────────┤
+│  Username: [________________]           │
+│  Password: [________________]           │
+│                                         │
+│  [OK]  [Cancel]                         │
+└─────────────────────────────────────────┘
+\`\`\`
+
+**What These Credentials Are Used For**:
+
+- **Container Identification**: Your username becomes part of the container name (e.g., \`IMPACTncd_Germany_username\`)
+- **RStudio Server Authentication**: These credentials are used to log into RStudio Server running inside the container
+- **SSH Key Generation**: Your username is used to create user-specific SSH keys for secure authentication
+- **Git Configuration**: Used to configure Git identity within the container for commits
+
+> **Security Note**: Your password is only used during the active session and is never saved to disk. It's cleared from memory after use.
+
+---
+
+## Workflow Guide
+
+The application follows a structured workflow:
+
+\`\`\`
+Start → Credentials → SSH Key Setup → Location Selection → Repository Selection → Container Management → RStudio Access
+\`\`\`
+
+### Step-by-Step Workflow
+
+1. **Enter Credentials** → Username and password for container access
+2. **SSH Key Setup** → Generate/configure SSH keys for GitHub integration
+3. **Choose Location** → Local (this PC) or Remote (workstation via SSH)
+4. **Select Repository** → Choose the model/project folder
+5. **Manage Container** → Start, stop, or check status
+6. **Access RStudio** → Open RStudio Server in browser
+7. **Manage Changes** → Commit and push Git changes when done
+
+---
+
+## SSH Key Setup for GitHub Integration
+
+After entering your credentials, the application automatically sets up SSH keys for GitHub authentication. **This step occurs before choosing local or remote deployment** and is required for both workflows.
+
+### Why SSH Keys Are Needed
+
+SSH keys enable passwordless Git operations (push, pull, commit) from within Docker containers, whether running locally or remotely. Without SSH keys configured in your GitHub account, Git operations from the container would fail or require constant password entry.
+
+### SSH Key Generation
+
+If you don't already have an SSH key for your username, the application generates one:
+
+\`\`\`
+================================================
+  STEP 2: SSH Key Setup for GitHub Integration
+================================================
+
+[INFO] Generating new SSH key pair for user: username
+  Key type: ed25519
+  Key location: C:\\Users\\YourName\\.ssh\\id_ed25519_username
+\`\`\`
+
+**Key Files Created**:
+- **Private Key**: \`C:\\Users\\YourName\\.ssh\\id_ed25519_username\`
+- **Public Key**: \`C:\\Users\\YourName\\.ssh\\id_ed25519_username.pub\`
+
+### Public Key Display
+
+After generation (or if keys already exist), your public key is displayed:
+
+\`\`\`
+┌─────────────────────────────────────────┐
+│  SSH Public Key - Add to GitHub         │
+├─────────────────────────────────────────┤
+│  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5...   │
+│                                         │
+│  This key enables GitHub authentication │
+│  from your Docker containers.           │
+│                                         │
+│  [Copy to Clipboard]  [Close]          │
+└─────────────────────────────────────────┘
+\`\`\`
+
+### Adding SSH Key to GitHub
+
+1. Click **Copy to Clipboard** to copy your public key
+2. Go to **GitHub.com** and sign in
+3. Navigate to **Settings** → **SSH and GPG keys**
+4. Click **New SSH key**
+5. Give it a descriptive title (e.g., "IMPACT Container - username")
+6. Paste the copied public key into the "Key" field
+7. Click **Add SSH key**
+
+### How SSH Keys Are Used
+
+**For Local Containers**:
+- Keys are mounted from \`C:\\Users\\YourName\\.ssh\\\` into the container at \`/home/rstudio/.ssh/\`
+- Git inside the container uses these keys for authentication
+- Enables seamless push/pull operations without password prompts
+
+**For Remote Containers**:
+- Keys are first copied from your local machine to the remote workstation (\`/home/php-workstation/.ssh/\`)
+- Then mounted from the remote location into the remote container
+- Used for both: passwordless SSH to the remote host AND GitHub authentication from the container
+
+> **Important**: The same SSH key pair is used universally - for GitHub authentication in both local and remote containers, and for passwordless SSH access to remote workstations.
+
+---
+
+## Container Location Selection
+
+After entering your credentials, you'll be asked to choose where to run the container:
+
+### Local vs Remote Selection Dialog
+
+\`\`\`
+┌─────────────────────────────────────────┐
+│  Where should the container be located? │
+├─────────────────────────────────────────┤
+│                                         │
+│   [Local Container]                     │
+│                                         │
+│   [Remote Container]  IP: [10.162...  ]│
+│                                         │
+│   ☐ Enable Debug Mode (show detailed   │
+│      progress messages)                 │
+│                                         │
+└─────────────────────────────────────────┘
+\`\`\`
+
+**Choose Local Container** when:
+- Docker Desktop is installed on your PC
+- You want to work with local files
+- You have sufficient system resources
+
+**Choose Remote Container** when:
+- You have access to a remote Linux workstation
+- The workstation has more computing power
+- Your project files are on the remote system
+- **Remote IP Address**: Enter the IP address of your remote workstation (e.g., \`10.162.192.90\`)
+
+**Debug Mode Option**: 
+- Check this box to enable detailed diagnostic messages throughout the application
+- Useful for troubleshooting issues
+- Debug messages appear in magenta color with \`[DEBUG]\` prefix
+- Shows Docker commands, SSH operations, file operations, and network tests
+- See the "Using Debug Mode" section under Troubleshooting for more details
+
+---
+
+## Local Container Workflow
+
+### 1. Folder Selection
+After selecting "Local", you'll see a folder browser dialog:
+
+\`\`\`
+Select the local folder containing your simulation model and its GitHub repository
+\`\`\`
+
+**Navigate to** and select your project folder (e.g., \`C:\\Projects\\IMPACTncd_Germany\`)
+
+> **Important**: The selected folder must contain a \`docker_setup\` subfolder. This subfolder contains the Docker configuration files (Dockerfile, docker-compose.yml, etc.) required to build and run IMPACT model containers. The application uses these files to properly configure the Docker environment for your specific model.
+
+### 2. Docker Desktop Auto-Start
+The application will verify Docker Desktop status:
+- ✓ Docker Desktop is installed
+- ✓ Docker service is running
+- ✓ Docker engine is accessible
+
+**If Docker Desktop is not running**, the application will **automatically attempt to start it**:
+\`\`\`
+[WARNING] Docker Desktop is not running
+[INFO] Attempting to start Docker Desktop...
+[INFO] Waiting for Docker to be ready...
+\`\`\`
+
+The application waits up to 60 seconds for Docker to fully initialize before proceeding.
+
+### 3. Repository Validation
+The application checks for:
+- ✓ Git repository exists (\`.git\` folder)
+- ✓ Project structure is valid
+- ✓ \`docker_setup\` subfolder exists
+- ✓ Configuration files are present
+
+### 4. Docker Context Setup
+
+The application configures Docker to use the local Docker Desktop engine:
+- Creates or uses a "local" Docker context
+- Points to the local Docker socket (npipe on Windows)
+- Tests Docker connectivity
+- Verifies Docker version
+
+### 5. sim_design.yaml Configuration
+
+The application reads the \`sim_design.yaml\` configuration file to extract directory paths:
+
+\`\`\`yaml
+# Example from sim_design.yaml
+synthpop_dir: ../synthpop
+output_dir: ../outputs
+\`\`\`
+
+The application uses these paths to:
+- Mount the synthpop directory into the container for data access
+- Mount the output directory for saving simulation results
+- Ensure data persistence between container sessions
+- Configure volume mounts automatically based on YAML settings
+
+**Custom YAML Files**: You can specify a different YAML file in the Container Management interface if you have multiple configuration files for different scenarios.
+
+---
+
+## Remote Container Workflow
+
+**Remote IP Address**: The IP address field is pre-filled with a default value (\`10.162.192.90\`) but you should update it to match your remote workstation's IP address.
+
+After clicking the Remote Container button with a valid IP, you'll be prompted for remote host credentials:
+
+\`\`\`
+┌─────────────────────────────────────────┐
+│  Remote Host Authentication             │
+├─────────────────────────────────────────┤
+│  Username: [php-workstation          ] │
+│  Password: [••••••••••••••••••••••••] │
+│                                         │
+│  [Connect]  [Cancel]                    │
+└─────────────────────────────────────────┘
+\`\`\`
+
+**What Happens During Connection**:
+- Tests SSH connectivity to the remote host
+- Copies your SSH public key to the remote workstation
+- Installs the key in \`/home/php-workstation/.ssh/authorized_keys\` for passwordless access
+- Copies your private key to \`/home/php-workstation/.ssh/id_ed25519_username\` for container mounting
+- Sets correct file permissions (700 for .ssh, 600 for keys)
+- Tests passwordless authentication
+
+> **Note**: The SSH keys that were generated in Step 2 are now installed on the remote host. This enables both passwordless SSH access to the workstation AND GitHub authentication from containers running on that remote host.
+
+### 2. Repository Scanning
+The application scans the remote host for available repositories:
+\`\`\`
+[INFO] Scanning remote host for available repositories...
+Found repositories:
+  - IMPACTncd_Japan
+  - IMPACTncd_Germany
+  - IMPACTncd_UK
+\`\`\`
+
+> **Note**: The scan looks for directories containing IMPACT model structures with the required \`docker_setup\` subfolder.
+
+### 3. Repository Selection
+Choose from available repositories:
+\`\`\`
+┌─────────────────────────────────────────┐
+│  Select Repository                      │
+├─────────────────────────────────────────┤
+│  ○ IMPACTncd_Japan                     │
+│  ○ IMPACTncd_Germany                   │
+│  ○ IMPACTncd_UK                        │
+│                                         │
+│  [OK]  [Cancel]                         │
+└─────────────────────────────────────────┘
+\`\`\`
+
+### 4. Docker Context Setup
+The application configures remote Docker access:
+- Creates Docker context for SSH connection
+- Tests Docker connectivity via SSH
+- Verifies Docker version on remote host
+
+### 5. sim_design.yaml Configuration
+
+The application reads the remote \`sim_design.yaml\` file to extract directory paths:
+
+\`\`\`yaml
+# Example from remote sim_design.yaml
+synthpop_dir: ../synthpop
+output_dir: ../outputs
+\`\`\`
+
+**How It Works**:
+- The application uses SSH to read the YAML file from the remote repository
+- Extracts \`synthpop_dir\` and \`output_dir\` paths
+- Resolves relative paths based on the remote repository location
+- Creates these directories on the remote host if they don't exist
+- Configures Docker volume mounts to make these directories accessible in the container
+
+**Custom YAML Files**: 
+- You can specify a different YAML file in the Container Management interface
+- Useful if you have multiple configuration files for different simulation scenarios
+- The default is \`../inputs/sim_design.yaml\` relative to the repository root
+- Custom paths can be absolute or relative to the repository
+
+**Path Resolution**:
+- Relative paths (e.g., \`../synthpop\`) are resolved relative to the repository root
+- Absolute paths (e.g., \`/data/synthpop\`) are used as-is
+- The application validates all paths exist or can be created before starting the container
+
+---
+
+## Container Management
+
+### Main Container Control Panel
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────┐
+│  Container: MyModel_username                                │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Current Status: STOPPED                                    │
+│                                                             │
+│  Choose an action:                                          │
+│  ○ Start Container                                          │
+│  ○ Stop Container                                           │
+│  ○ Check Status                                             │
+│                                                             │
+│  [OK]  [Cancel]                                             │
+└─────────────────────────────────────────────────────────────┘
+\`\`\`
+
+### Starting a Container
+
+When you select "Start Container":
+
+1. **Pre-Start Checks**:
+   - ✓ Checks if container already exists
+   - ✓ Validates YAML configuration
+   - ✓ Creates required directories
+   - ✓ Captures Git repository state
+
+2. **Container Creation** (if new):
+   \`\`\`
+   [INFO] Creating new container: MyModel_username
+   [INFO] Building Docker image...
+   [INFO] Configuring volume mounts...
+   [INFO] Setting up environment variables...
+   \`\`\`
+
+3. **Container Start** (if exists):
+   \`\`\`
+   [INFO] Starting existing container: MyModel_username
+   \`\`\`
+
+4. **Progress Display**:
+   A detailed progress window shows real-time output:
+   \`\`\`
+   ┌─────────────────────────────────────────┐
+   │  Container Start Progress               │
+   ├─────────────────────────────────────────┤
+   │  [=================75%================] │
+   │                                         │
+   │  Building image...                      │
+   │  Step 3/10 : RUN apt-get update         │
+   │  Downloading packages...                │
+   │                                         │
+   └─────────────────────────────────────────┘
+   \`\`\`
+
+5. **Success Notification**:
+   \`\`\`
+   ┌─────────────────────────────────────────┐
+   │  Container Started Successfully         │
+   ├─────────────────────────────────────────┤
+   │  RStudio Server is now accessible at:   │
+   │                                         │
+   │  http://localhost:8787                  │
+   │                                         │
+   │  Click OK to open in browser            │
+   │                                         │
+   │  [OK]                                   │
+   └─────────────────────────────────────────┘
+   \`\`\`
+
+### Stopping a Container
+
+When you select "Stop Container":
+
+1. **Confirmation**:
+   \`\`\`
+   Are you sure you want to stop container 'MyModel_username'?
+   \`\`\`
+
+2. **Git Change Detection**:
+   The application checks for uncommitted changes:
+   \`\`\`
+   [INFO] Git changes detected! Found 3 modified files
+   Would you like to commit these changes?
+   \`\`\`
+
+3. **Stop Process**:
+   \`\`\`
+   [INFO] Stopping container: MyModel_username
+   [INFO] Container stopped successfully
+   \`\`\`
+
+### Checking Container Status
+
+When you select "Check Status":
+
+\`\`\`
+┌─────────────────────────────────────────┐
+│  Container Status                       │
+├─────────────────────────────────────────┤
+│  Container: MyModel_username            │
+│  Status: RUNNING                        │
+│  Uptime: 2 hours 34 minutes             │
+│  CPU Usage: 15%                         │
+│  Memory: 2.1 GB / 4.0 GB                │
+│                                         │
+│  Port Mappings:                         │
+│    8787 → 8787 (RStudio)               │
+│                                         │
+│  [OK]                                   │
+└─────────────────────────────────────────┘
+\`\`\`
+
+---
+
+## Git Integration
+
+### Automatic Git State Tracking
+
+The application automatically tracks your Git repository state:
+
+**Before Container Start**:
+- Captures current commit hash
+- Lists modified files
+- Lists untracked files
+- Records timestamp
+
+**After Container Stop**:
+- Compares current state with captured state
+- Detects new or modified files
+- Prompts for commit if changes found
+
+### Committing Changes
+
+When changes are detected:
+
+\`\`\`
+┌─────────────────────────────────────────────────────────┐
+│  Git Changes Detected                                   │
+├─────────────────────────────────────────────────────────┤
+│  Changes have been detected and staged.                 │
+│  Enter a commit message:                                │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐  │
+│  │ Update after container execution               │  │
+│  │                                                  │  │
+│  │                                                  │  │
+│  └─────────────────────────────────────────────────┘  │
+│                                                         │
+│  Status: Ready to commit                                │
+│                                                         │
+│  [Commit & Push]  [Skip]                                │
+└─────────────────────────────────────────────────────────┘
+\`\`\`
+
+### Commit & Push Process
+
+1. **Staging**: All changes are automatically staged
+2. **Commit**: Changes committed with your message
+3. **Push**: Pushed to remote repository (GitHub)
+
+**Progress Messages**:
+\`\`\`
+[INFO] Staging all changes...
+[SUCCESS] Changes staged successfully
+[INFO] Committing changes...
+[SUCCESS] Changes committed successfully
+[INFO] Pushing to remote repository...
+[SUCCESS] Changes pushed successfully
+\`\`\`
+
+### SSH Key Management for Git
+
+The application handles Git authentication automatically using SSH keys for **both local and remote containers**:
+
+**SSH Key Setup (Both Workflows)**:
+- Generated once per username: \`C:\\Users\\YourName\\.ssh\\id_ed25519_username\`
+- Public key must be added to your GitHub account (Settings → SSH and GPG keys)
+- Same key pair used for all container operations
+
+**For Local Containers**:
+- SSH keys are mounted from local \`.ssh\` directory into container
+- Container path: \`/home/rstudio/.ssh/\`
+- Git operations use SSH authentication automatically
+- No password prompts during push/pull operations
+
+**For Remote Containers**:
+- SSH keys are copied from local machine to remote workstation during setup
+- Remote location: \`/home/php-workstation/.ssh/id_ed25519_username\`
+- Keys are mounted into the remote container at \`/home/rstudio/.ssh/\`
+- Enables passwordless SSH to remote host AND GitHub operations from container
+- Git operations configured to use SSH keys automatically
+
+**Git Configuration**:
+\`\`\`bash
+# Inside container (local or remote), Git is configured to use SSH:
+export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_username -o IdentitiesOnly=yes'
+git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_username -o IdentitiesOnly=yes'
+\`\`\`
+
+**Benefits**:
+- ✓ No password prompts during Git operations
+- ✓ Secure key-based authentication
+- ✓ Same workflow for local and remote containers
+- ✓ Automatic configuration - no manual setup needed
+
+---
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### Docker Desktop Not Running
+
+**Symptom**:
+\`\`\`
+[ERROR] Docker Desktop is not running
+\`\`\`
+
+**Solution**:
+1. Open Docker Desktop from Start Menu
+2. Wait for Docker to fully start (green icon in system tray)
+3. Retry the operation
+
+---
+
+#### SSH Connection Failed
+
+**Symptom**:
+\`\`\`
+[ERROR] Could not connect to remote host
+\`\`\`
+
+**Solutions**:
+1. **Check Network**: Ping the remote host IP
+2. **Verify Credentials**: Ensure username/password are correct
+3. **Check Firewall**: Port 22 must be open on remote host
+4. **Test SSH**: Try \`ssh user@hostname\` in PowerShell
+
+---
+
+#### Container Won't Start
+
+**Symptom**:
+\`\`\`
+[ERROR] Failed to start container
+\`\`\`
+
+**Solutions**:
+1. **Check Docker**: Ensure Docker service is running
+2. **Check Ports**: Port 8787 must not be in use
+3. **Check Resources**: Ensure sufficient disk space and memory
+4. **Review Logs**: Enable Debug Mode and check detailed output
+
+---
+
+#### Permission Denied Errors
+
+**Symptom**:
+\`\`\`
+[ERROR] Permission denied
+\`\`\`
+
+**Solutions**:
+1. **Run as Administrator**: Right-click → Run as Administrator
+2. **Check Docker Permissions**: Ensure user is in docker-users group
+3. **File Permissions**: Check folder permissions for mounted volumes
+
+---
+
+#### Git Push Failed
+
+**Symptom**:
+\`\`\`
+[ERROR] Git push failed
+\`\`\`
+
+**Solutions**:
+1. **Check Network**: Ensure GitHub is accessible
+2. **Check SSH Keys**: Verify SSH keys are added to GitHub account
+3. **Test SSH Connection**: Run \`ssh -T git@github.com\` from container
+4. **Pull First**: Remote may have newer commits - pull before push
+5. **Use VS Code**: Option to open in VS Code for manual resolution
+
+---
+
+### Using Debug Mode
+
+Debug Mode can be enabled at the container location selection dialog by checking **"Enable Debug Mode"**.
+
+**What Debug Mode Shows**:
+- Detailed diagnostic information in magenta color
+- Docker command execution and output
+- SSH connection attempts and results
+- File system operations
+- Path resolution details
+- Network connectivity tests
+- Git operations step-by-step
+
+**Debug Message Format**:
+\`\`\`
+[DEBUG] Administrator privileges: Present
+[DEBUG] Docker version: 24.0.6
+[DEBUG] Container name: IMPACTncd_Germany_username
+[DEBUG] SSH key path: C:\\Users\\YourName\\.ssh\\id_ed25519_username
+[DEBUG] Remote YAML content length: 1524 bytes
+\`\`\`
+
+**When to Use Debug Mode**:
+- Troubleshooting connection issues
+- Diagnosing Docker problems
+- Understanding application workflow
+- Reporting issues to support
+- Validating path configurations
+
+---
+
+## Docker Configuration
+
+### Docker Images and Containers
+
+*This section will contain detailed information about:*
+- *Docker image architecture*
+- *Dockerfile structure and layers*
+- *Base images and dependencies*
+- *Environment variable configuration*
+- *Volume mount strategies*
+- *Network configuration*
+- *Port mappings*
+- *Container resource limits*
+- *Custom image building*
+- *Image optimization techniques*
+
+*[Content to be added]*
+
+---
+
+## Advanced Features
+
+### Multi-Monitor Support
+
+The application automatically detects your monitor configuration:
+- Forms appear on the monitor where your cursor is located
+- Intelligent centering based on active screen
+- Works with any number of monitors
+
+### Container Safety Features
+
+**Automatic Protection**:
+- Application prevents closing while container is running
+- Warning message if you try to close with active container
+- Must stop container before exiting
+
+\`\`\`
+┌─────────────────────────────────────────┐
+│  Container Still Running                │
+├─────────────────────────────────────────┤
+│  The container 'MyModel_username' is    │
+│  still RUNNING.                         │
+│                                         │
+│  Please stop the container before       │
+│  closing!                               │
+│                                         │
+│  [OK]                                   │
+└─────────────────────────────────────────┘
+\`\`\`
+
+### YAML Configuration Auto-Detection
+
+The application automatically reads configuration from \`sim_design.yaml\` files:
+
+**Default Configuration File**:
+- Path: \`../inputs/sim_design.yaml\` (relative to repository root)
+- Can be customized in the Container Management interface
+
+**What Gets Extracted**:
+- \`synthpop_dir\`: Directory containing synthetic population data
+- \`output_dir\`: Directory for simulation output files
+- Other paths specified in the YAML configuration
+
+**Directory Management**:
+- Paths are resolved (relative → absolute)
+- Directories are validated or created automatically
+- Volume mounts configured based on extracted paths
+- Works for both local and remote containers
+
+**Custom YAML Files**:
+In the Container Management interface, you can specify a different YAML file:
+\`\`\`
+sim_design.yaml file used for directories:
+[../inputs/custom_scenario.yaml     ]
+\`\`\`
+
+**Benefits**:
+- Consistent configuration across different simulation scenarios
+- Easy switching between configurations
+- Automatic path resolution and validation
+- No manual volume mount configuration needed
+
+**Example YAML Structure**:
+\`\`\`yaml
+synthpop_dir: ../synthpop           # Relative path
+output_dir: /data/outputs           # Absolute path
+input_dir: ../inputs/baseline       # Relative path
+\`\`\`
+
+All paths specified in the YAML are automatically mounted into the container at runtime.
+
+### Intelligent Path Conversion
+
+Automatic path format conversion:
+- **Windows paths** → **Docker/WSL format**
+- Example: \`C:/Projects/MyModel\` → \`/c/Projects/MyModel\`
+- Works for all volume mounts
+
+### SSH Key Lifecycle Management
+
+Complete SSH key management:
+1. **Generation**: Creates ed25519 keys (most secure)
+2. **Display**: Shows public key for copying
+3. **Installation**: Installs to remote authorized_keys
+4. **Validation**: Tests passwordless authentication
+5. **Cleanup**: Secure memory cleanup after use
+
+---
+
+## FAQ
+
+### General Questions
+
+**Q: Do I need to install anything besides IMPACT.exe?**  
+A: IMPACT.exe must first be compiled from source (see \`COMPILATION-README.md\`). For local containers, you need Docker Desktop. For remote containers, you need network access to the remote host with Docker installed.
+
+**Q: How do I get IMPACT.exe?**  
+A: IMPACT.exe is compiled from \`access_rstudio_gui.ps1\` using the ps2exe module. Use the provided batch files (\`Quick-Compile.bat\` or \`Compile-IMPACT.bat\`) or run \`.\\Compile-IMPACT.ps1\` manually. See the Installation section for details.
+
+**Q: Can I run multiple containers simultaneously?**  
+A: Yes, each user gets a unique container based on username. Different users can run containers simultaneously on the same host.
+
+**Q: Where are my files stored?**  
+A: For local containers, files are in the folder you selected (mounted into the container). For remote containers, files are on the remote workstation. All changes are persisted outside the container in the mounted directories.
+
+**Q: Is my password stored anywhere?**  
+A: No. Passwords are only used during the session and are never saved to disk. They're cleared from memory after use.
+
+**Q: Can I use this without administrator privileges?**  
+A: No. Docker operations require administrator privileges on Windows.
+
+**Q: What is the docker_setup folder?**  
+A: The \`docker_setup\` subfolder contains Docker configuration files (Dockerfile, docker-compose.yml, etc.) specific to IMPACT models. This folder must be present in your repository for the container to build correctly.
+
+### Docker Questions
+
+**Q: Which Docker version do I need?**  
+A: Docker Desktop 4.0 or later for local containers. Any recent Docker version on the remote Linux host.
+
+**Q: Can I use Podman instead of Docker?**  
+A: Currently, only Docker is supported. Podman support may be added in future versions.
+
+**Q: How much disk space do containers use?**  
+A: Base images are typically 2-4 GB. Your project data adds to this. Ensure at least 10 GB free space.
+
+**Q: Are containers deleted when stopped?**  
+A: No. Containers persist until explicitly removed. Stopping keeps the container and all data.
+
+### Git Questions
+
+**Q: What if I don't have a Git repository?**  
+A: The application works without Git, but change tracking and commit features won't be available. However, IMPACT models typically require Git repositories.
+
+**Q: Can I use GitLab or Bitbucket instead of GitHub?**  
+A: Yes. The application works with any Git remote repository. You'll need to add your SSH public key to the respective service.
+
+**Q: Do I need to set up Git credentials manually?**  
+A: No. The application automatically generates SSH keys and configures Git to use them. You only need to add the public key to your GitHub account once.
+
+**Q: What happens if I have uncommitted changes when starting?**  
+A: The application captures the state but doesn't prevent starting. You can commit changes after stopping.
+
+**Q: Can I commit changes manually instead of using the application?**  
+A: Yes. You can skip the commit dialog and use Git command line or VS Code.
+
+**Q: Why do I need to add SSH keys to GitHub?**  
+A: SSH keys enable passwordless Git operations (push, pull) from within the container. Without them, Git operations would require password entry which isn't practical in containerized environments.
+
+### Remote Connection Questions
+
+**Q: What Linux distributions are supported for remote hosts?**  
+A: Tested with Ubuntu 24.04. Should work with most modern Linux distributions running Docker.
+
+**Q: Can I connect to multiple remote hosts?**  
+A: Yes. The application creates unique SSH keys for each username, allowing connections to different hosts.
+
+**Q: What if I don't have SSH access to the remote host?**  
+A: You'll need to request SSH access from your system administrator.
+
+**Q: Does the remote host need to be on the same network?**  
+A: No. As long as you can reach the host via SSH (including through VPN), it will work.
+
+**Q: Are SSH keys stored on the remote host?**  
+A: Yes. Your public key is added to \`/home/php-workstation/.ssh/authorized_keys\` for passwordless access. Your private key stays on your local machine and is securely copied to \`/home/php-workstation/.ssh/\` on the remote host for container mounting purposes.
+
+**Q: What happens to my SSH keys after setup?**  
+A: They remain on your local machine (\`.ssh\` folder) and on the remote host. They can be reused for future sessions without regeneration.
+
+### Configuration Questions
+
+**Q: What is sim_design.yaml and why is it needed?**  
+A: \`sim_design.yaml\` is a configuration file that specifies directory paths for your simulation (e.g., \`synthpop_dir\`, \`output_dir\`). The application reads this file to automatically configure Docker volume mounts, ensuring your data directories are accessible inside the container.
+
+**Q: Can I use a different YAML file?**  
+A: Yes. In the Container Management interface, you can specify a custom path in the "sim_design.yaml file used for directories" field. This is useful for different simulation scenarios.
+
+**Q: What if my YAML file has relative paths?**  
+A: The application automatically resolves relative paths based on your repository root. For example, \`../synthpop\` becomes an absolute path before mounting into the container.
+
+**Q: What directories are created from sim_design.yaml?**  
+A: The application reads paths like \`synthpop_dir\` and \`output_dir\` from the YAML, creates them if they don't exist, and mounts them into the container so your simulations can access data and save results.
+
+**Q: Do I need the docker_setup folder?**  
+A: Yes. The \`docker_setup\` subfolder must be present in your repository. It contains the Dockerfile and other Docker configuration files specific to IMPACT models.
+
+---
+
+## Support and Additional Resources
+
+### Getting Help
+
+- **Debug Mode**: Enable for detailed diagnostic information
+- **Log Files**: Check PowerShell output for error messages
+- **Documentation**: Refer to this manual for workflow guidance
+
+### Best Practices
+
+1. **Always stop containers** when finished working
+2. **Commit changes regularly** to avoid data loss
+3. **Use PowerShell 7** for best compatibility
+4. **Keep Docker Desktop updated** for security and features
+5. **Use descriptive commit messages** for better tracking
+6. **Enable Debug Mode** when troubleshooting issues
+
+### Version Information
+
+- **Application**: IMPACT Container Manager
+- **Version**: 1.0
+- **Build**: ps2exe compiled PowerShell executable
+- **Platform**: Windows 10/11 with PowerShell 5.1+
+
+---
+
+## Appendix
+
+### Keyboard Shortcuts
+
+- **Enter**: Confirm/OK on focused button
+- **Esc**: Cancel/Close dialog
+- **Tab**: Navigate between fields
+- **Ctrl+C**: Copy (in text boxes)
+
+### File Locations
+
+**SSH Keys**:
+\`\`\`
+C:\\Users\\YourName\\.ssh\\id_ed25519_username
+C:\\Users\\YourName\\.ssh\\id_ed25519_username.pub
+\`\`\`
+
+**Docker Context**:
+\`\`\`
+Docker contexts are managed by Docker Desktop
+View with: docker context ls
+\`\`\`
+
+**Application Location**:
+\`\`\`
+Can be placed anywhere - no installation needed
+Recommended: C:\\Tools\\IMPACT.exe or Desktop
+\`\`\`
+
+### Technical Details
+
+**Supported PowerShell Versions**:
+- Windows PowerShell 5.1 ✓
+- PowerShell 7.x ✓ (Recommended)
+
+**Network Ports Used**:
+- 8787: RStudio Server
+- 22: SSH (for remote connections)
+
+**Container Naming**:
+- Pattern: \`{RepositoryName}_{Username}\`
+- Example: \`IMPACTncd_Japan_jsmith\`
+
+---
+
+*Document Version: 1.0*  
+*Last Updated: October 2025*  
+*Application: IMPACT Container Manager (IMPACT.exe)*
+`;
+        
+        // Convert and sanitize
+        const rawHtml = marked.parse(markdown);
+        const cleanHtml = DOMPurify.sanitize(rawHtml);
+        
+        // Insert into page
+        document.getElementById('content').innerHTML = cleanHtml;
+        
+        // Add copy buttons to code blocks
+        document.querySelectorAll('pre code').forEach((block) => {
+            const button = document.createElement('button');
+            button.innerText = 'Copy';
+            button.style.cssText = 'position: absolute; top: 5px; right: 5px; padding: 4px 8px; font-size: 12px; cursor: pointer;';
+            
+            const pre = block.parentElement;
+            pre.style.position = 'relative';
+            
+            button.addEventListener('click', () => {
+                navigator.clipboard.writeText(block.textContent);
+                button.innerText = 'Copied!';
+                setTimeout(() => { button.innerText = 'Copy'; }, 2000);
+            });
+            
+            pre.insertBefore(button, block);
+        });
+    </script>
+</body>
+</html>
