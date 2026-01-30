@@ -4971,23 +4971,40 @@ Write-Host "  Selected Repository: $($script:SelectedRepo)"
 Write-Host "  Username: $USERNAME"
 Write-Host ""
 
-# Check if the specific container is currently running
+# Check if the specific container is currently running and retrieve its details
 $isContainerRunning = $false
+$existingContainerPort = $null
+$existingContainerUrl = $null
 try {
     # Ensure SSH environment is set for remote Docker operations
     Set-DockerSSHEnvironment
     
     if ($CONTAINER_LOCATION -eq "LOCAL") {
-        $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
     } else {
-        $runningCheck = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        $runningCheck = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
     }
     if ($null -eq $runningCheck) {
         $runningCheck = "this_container_does_not_exist" # Default to non-matching string
     }
-    if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
+    if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -match "^$CONTAINER_NAME") {
         $isContainerRunning = $true
-        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING" -ForegroundColor Cyan
+        
+        # Extract port information from the running container
+        if ($runningCheck -match '0\.0\.0\.0:(\d{4})->8787/tcp') {
+            $existingContainerPort = $matches[1]
+            Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING on port $existingContainerPort" -ForegroundColor Green
+            
+            # Build the access URL for the existing container
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                $existingContainerUrl = "http://localhost:$existingContainerPort"
+            } else {
+                $existingContainerUrl = "http://$($script:RemoteHostIp):$existingContainerPort"
+            }
+            Write-Host "[INFO] Access URL: $existingContainerUrl" -ForegroundColor Cyan
+        } else {
+            Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING (port info not detected)" -ForegroundColor Cyan
+        }
     } else {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist" -ForegroundColor Cyan
     }
@@ -4999,10 +5016,10 @@ Write-Host ""
 Write-Host "Creating container management interface..."
 Write-Host ""
 
-# Create the main container management form
+# Create the main container management form (size adjusts if container is running)
 $formContainer = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Container Management - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(500,480)
+    Size = New-Object System.Drawing.Size(500,$(if ($isContainerRunning) { 505 } else { 480 }))
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
 }
@@ -5051,6 +5068,18 @@ $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans
 if ($isContainerRunning) {
     $labelInstruction.SelectionColor = [System.Drawing.Color]::Green
     $labelInstruction.AppendText("RUNNING")
+    
+    # Add access URL information if container is already running
+    if ($existingContainerUrl) {
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Black
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.AppendText("`n`n")
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        $labelInstruction.AppendText("Access your running container at:`n")
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Blue
+        $labelInstruction.AppendText("$existingContainerUrl")
+    }
 } else {
     $labelInstruction.SelectionColor = [System.Drawing.Color]::Red
     $labelInstruction.AppendText("STOPPED")
@@ -5058,13 +5087,13 @@ if ($isContainerRunning) {
 
 $formContainer.Controls.Add($labelInstruction)
 
-# Start button
+# Start/Access button (text changes based on container state)
 $buttonStart = New-Object System.Windows.Forms.Button -Property @{
-    Text = 'Start Container'
+    Text = $(if ($isContainerRunning) { 'Access Container' } else { 'Start Container' })
     Location = New-Object System.Drawing.Point(100,165)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
-    Enabled = -not $isContainerRunning
+    Enabled = $true
 }
 $formContainer.Controls.Add($buttonStart)
 
@@ -5078,10 +5107,27 @@ $buttonStop = New-Object System.Windows.Forms.Button -Property @{
 }
 $formContainer.Controls.Add($buttonStop)
 
+# Session info label (if container is running)
+if ($isContainerRunning) {
+    $labelSessionInfo = New-Object System.Windows.Forms.Label -Property @{ 
+        Text = "💡 Your session is persistent - you can close this window and reconnect anytime!"
+        Location = New-Object System.Drawing.Point(10,220)
+        Size = New-Object System.Drawing.Size(470,20)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Italic)
+        ForeColor = [System.Drawing.Color]::DarkGreen
+    }
+    $formContainer.Controls.Add($labelSessionInfo)
+    
+    # Adjust positions for controls below
+    $advancedOptionsYPosition = 245
+} else {
+    $advancedOptionsYPosition = 220
+}
+
 # Advanced Options section
 $labelAdvanced = New-Object System.Windows.Forms.Label -Property @{ 
     Text = "Advanced Options:"
-    Location = New-Object System.Drawing.Point(10,220)
+    Location = New-Object System.Drawing.Point(10,$advancedOptionsYPosition)
     Size = New-Object System.Drawing.Size(470,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -5090,7 +5136,7 @@ $formContainer.Controls.Add($labelAdvanced)
 # Checkbox option
 $checkBoxVolumes = New-Object System.Windows.Forms.CheckBox -Property @{
     Text = 'Use Docker Volumes'
-    Location = New-Object System.Drawing.Point(20,245)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 270 } else { 245 }))
     Size = New-Object System.Drawing.Size(150,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
@@ -5099,7 +5145,7 @@ $formContainer.Controls.Add($checkBoxVolumes)
 # Rebuild image checkbox option
 $checkBoxRebuild = New-Object System.Windows.Forms.CheckBox -Property @{
     Text = 'Rebuild Docker image for repository'
-    Location = New-Object System.Drawing.Point(175,245)
+    Location = New-Object System.Drawing.Point(175,$(if ($isContainerRunning) { 270 } else { 245 }))
     Size = New-Object System.Drawing.Size(250,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
@@ -5108,7 +5154,7 @@ $formContainer.Controls.Add($checkBoxRebuild)
 # High computational demand checkbox option
 $checkBoxHighCompute = New-Object System.Windows.Forms.CheckBox -Property @{
     Text = 'High computational demand'
-    Location = New-Object System.Drawing.Point(20,270)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 295 } else { 270 }))
     Size = New-Object System.Drawing.Size(200,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
@@ -5117,12 +5163,12 @@ $formContainer.Controls.Add($checkBoxHighCompute)
 # Port override label and textbox
 $labelPort = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Port Override:'
-    Location = New-Object System.Drawing.Point(20,305)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 330 } else { 305 }))
     Size = New-Object System.Drawing.Size(90,20)
 }
 $formContainer.Controls.Add($labelPort)
 $textBoxPort = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(110,300)
+    Location = New-Object System.Drawing.Point(110,$(if ($isContainerRunning) { 325 } else { 300 }))
     Size = New-Object System.Drawing.Size(100,20)
     Text = '8787'
 }
@@ -5131,12 +5177,12 @@ $formContainer.Controls.Add($textBoxPort)
 # Custom parameters label and textbox
 $labelParams = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Custom Parameters:'
-    Location = New-Object System.Drawing.Point(20,340)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 365 } else { 340 }))
     Size = New-Object System.Drawing.Size(120,20)
 }
 $formContainer.Controls.Add($labelParams)
 $textBoxParams = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(140,335)
+    Location = New-Object System.Drawing.Point(140,$(if ($isContainerRunning) { 360 } else { 335 }))
     Size = New-Object System.Drawing.Size(200,20)
     Text = ''
 }
@@ -5145,12 +5191,12 @@ $formContainer.Controls.Add($textBoxParams)
 # sim_design.yaml file label and textbox
 $labelSimDesign = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'sim_design.yaml file used for directories:'
-    Location = New-Object System.Drawing.Point(20,375)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 400 } else { 375 }))
     Size = New-Object System.Drawing.Size(230,20)
 }
 $formContainer.Controls.Add($labelSimDesign)
 $textBoxSimDesign = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(250,370)
+    Location = New-Object System.Drawing.Point(250,$(if ($isContainerRunning) { 395 } else { 370 }))
     Size = New-Object System.Drawing.Size(220,20)
     Text = '..\inputs\sim_design.yaml'
 }
@@ -5159,14 +5205,14 @@ $formContainer.Controls.Add($textBoxSimDesign)
 # OK and Cancel buttons
 $buttonOK = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Close'
-    Location = New-Object System.Drawing.Point(300,390)
+    Location = New-Object System.Drawing.Point(300,$(if ($isContainerRunning) { 415 } else { 390 }))
     Size = New-Object System.Drawing.Size(75,30)
 }
 $formContainer.Controls.Add($buttonOK)
 
 $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Cancel'
-    Location = New-Object System.Drawing.Point(395,390)
+    Location = New-Object System.Drawing.Point(395,$(if ($isContainerRunning) { 415 } else { 390 }))
     Size = New-Object System.Drawing.Size(75,30)
     DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 }
@@ -5309,7 +5355,81 @@ $script:RsyncImage = $null
 
 # Event handlers
 $buttonStart.Add_Click({
+    # First check if container is already running (session recovery)
     Write-Host ""
+    Write-Host "[INFO] Checking container status..." -ForegroundColor Cyan
+    Write-Host "  Container: $CONTAINER_NAME"
+    Write-Host ""
+    
+    try {
+        Set-DockerSSHEnvironment
+        $containerCheckResult = $null
+        
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            $containerCheckResult = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
+        } else {
+            $containerCheckResult = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
+        }
+        
+        if ($LASTEXITCODE -eq 0 -and $containerCheckResult -and $containerCheckResult.Trim() -match "^$CONTAINER_NAME") {
+            # Container is already running - provide access information
+            Write-Host "[INFO] Container '$CONTAINER_NAME' is already RUNNING!" -ForegroundColor Green
+            
+            # Extract port and build URL
+            $portNumber = "8787"
+            if ($containerCheckResult -match '0\.0\.0\.0:(\d{4})->8787/tcp') {
+                $portNumber = $matches[1]
+            }
+            
+            $accessUrl = if ($CONTAINER_LOCATION -eq "LOCAL") {
+                "http://localhost:$portNumber"
+            } else {
+                "http://$($script:RemoteHostIp):$portNumber"
+            }
+            
+            Write-Host "[INFO] Container details:" -ForegroundColor Cyan
+            Write-Host "  URL: $accessUrl" -ForegroundColor Cyan
+            Write-Host "  Username: rstudio" -ForegroundColor Cyan
+            Write-Host "  Password: $PASSWORD" -ForegroundColor Cyan
+            Write-Host ""
+            
+            # Show info dialog with access details and option to open browser
+            $resumeMessage = "Your container is already running!`n`n" +
+                           "You can continue your work session by accessing:`n`n" +
+                           "URL: $accessUrl`n" +
+                           "Username: rstudio`n" +
+                           "Password: $PASSWORD`n`n" +
+                           "Container: $CONTAINER_NAME`n" +
+                           "Location: $CONTAINER_LOCATION`n`n" +
+                           "Would you like to open the RStudio Server in your browser?"
+            
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                $resumeMessage,
+                "Resume Existing Session - $CONTAINER_NAME",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+            
+            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+                Write-Host "[INFO] Opening browser to access RStudio Server..." -ForegroundColor Cyan
+                Start-Process $accessUrl
+            }
+            
+            Write-Host "[INFO] Session resumed - container continues running" -ForegroundColor Green
+            Write-Host ""
+            
+            # Update UI to reflect running state
+            $buttonStart.Text = 'Access Container'
+            $buttonStop.Enabled = $true
+            Update-InstructionText -Status "RUNNING" -Location $CONTAINER_LOCATION -VolumesInfo $(if($checkBoxVolumes.Checked) { "Enabled" } else { "Disabled" })
+            
+            return  # Exit the click handler without starting new container
+        }
+    } catch {
+        Write-Host "[WARNING] Error checking container status: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "[INFO] Proceeding with container startup..." -ForegroundColor Cyan
+    }
+    
     Write-Host "[INFO] Container is starting up..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
     
