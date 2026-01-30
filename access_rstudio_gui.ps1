@@ -1119,7 +1119,7 @@ $formConnection.Controls.Add($labelRemoteIP)
 $textRemoteIP = New-Object System.Windows.Forms.TextBox -Property @{ 
     Location = New-Object System.Drawing.Point(280,120)
     Size = New-Object System.Drawing.Size(120,20)
-    Text = '10.162.192.90'
+    Text = '10.162.194.34'
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Regular)
 }
 $formConnection.Controls.Add($textRemoteIP)
@@ -1929,7 +1929,19 @@ echo "SCRIPT_END"
                                     if (Test-Path $sshPrivateKeyPath) {
                                         # First, ensure the remote .ssh directory exists with correct permissions
                                         $setupRemoteSSHCommand = "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
-                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $setupRemoteSSHCommand 2>&1 | Out-Null
+                                        $setupRemoteSSHJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $setupRemoteSSHCommand
+                                        
+                                        if (Wait-Job $setupRemoteSSHJob -Timeout 15) {
+                                            Receive-Job $setupRemoteSSHJob | Out-Null
+                                            Remove-Job $setupRemoteSSHJob
+                                        } else {
+                                            Remove-Job $setupRemoteSSHJob -Force
+                                            Write-Host "    [WARNING] Remote SSH directory setup timed out after 15 seconds" -ForegroundColor Yellow
+                                        }
                                         
                                         # Read private key content and encode in base64 to avoid shell escaping issues
                                         $privateKeyContent = Get-Content $sshPrivateKeyPath -Raw
@@ -1937,16 +1949,52 @@ echo "SCRIPT_END"
                                         
                                         # Remove any existing file/directory that might be in the way
                                         $cleanupPrivateKeyCommand = "rm -rf ~/.ssh/id_ed25519_${USERNAME}"
-                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $cleanupPrivateKeyCommand 2>&1 | Out-Null
+                                        $cleanupPrivateKeyJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $cleanupPrivateKeyCommand
+                                        
+                                        if (Wait-Job $cleanupPrivateKeyJob -Timeout 15) {
+                                            Receive-Job $cleanupPrivateKeyJob | Out-Null
+                                            Remove-Job $cleanupPrivateKeyJob
+                                        } else {
+                                            Remove-Job $cleanupPrivateKeyJob -Force
+                                            Write-Host "    [WARNING] Private key cleanup timed out after 15 seconds" -ForegroundColor Yellow
+                                        }
                                         
                                         # Copy private key to remote system
                                         $copyPrivateKeyCommand = "echo '$privateKeyBase64' | base64 -d > ~/.ssh/id_ed25519_${USERNAME} && chmod 600 ~/.ssh/id_ed25519_${USERNAME} && echo PRIVATE_KEY_COPIED"
-                                        $privateKeyCopyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $copyPrivateKeyCommand 2>&1
+                                        $copyPrivateKeyJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $copyPrivateKeyCommand
+                                        
+                                        if (Wait-Job $copyPrivateKeyJob -Timeout 15) {
+                                            $privateKeyCopyResult = Receive-Job $copyPrivateKeyJob
+                                            Remove-Job $copyPrivateKeyJob
+                                        } else {
+                                            Remove-Job $copyPrivateKeyJob -Force
+                                            $privateKeyCopyResult = "Private key copy timed out after 15 seconds"
+                                        }
                                         
                                         if ($privateKeyCopyResult -match "PRIVATE_KEY_COPIED") {
                                             # Verify the private key was actually copied as a file
                                             $verifyPrivateKeyCommand = "test -f ~/.ssh/id_ed25519_${USERNAME} && echo PRIVATE_KEY_FILE_EXISTS || echo PRIVATE_KEY_FILE_MISSING"
-                                            $privateKeyVerifyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $verifyPrivateKeyCommand 2>&1
+                                            $verifyPrivateKeyJob = Start-Job -ScriptBlock {
+                                                param($sshKeyPath, $remoteHost, $command)
+                                                $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                                return $result
+                                            } -ArgumentList $sshKeyPath, $remoteHost, $verifyPrivateKeyCommand
+                                            
+                                            if (Wait-Job $verifyPrivateKeyJob -Timeout 15) {
+                                                $privateKeyVerifyResult = Receive-Job $verifyPrivateKeyJob
+                                                Remove-Job $verifyPrivateKeyJob
+                                            } else {
+                                                Remove-Job $verifyPrivateKeyJob -Force
+                                                $privateKeyVerifyResult = "Private key verification timed out after 15 seconds"
+                                            }
                                             
                                             if ($privateKeyVerifyResult -match "PRIVATE_KEY_FILE_EXISTS") {
                                                 Write-Host "    [SUCCESS] Private key copied and verified as file on remote system" -ForegroundColor Green
@@ -1967,16 +2015,52 @@ echo "SCRIPT_END"
                                         
                                         # Remove any existing file/directory that might be in the way
                                         $cleanupKnownHostsCommand = "rm -rf ~/.ssh/known_hosts"
-                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $cleanupKnownHostsCommand 2>&1 | Out-Null
+                                        $cleanupKnownHostsJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $cleanupKnownHostsCommand
+                                        
+                                        if (Wait-Job $cleanupKnownHostsJob -Timeout 15) {
+                                            Receive-Job $cleanupKnownHostsJob | Out-Null
+                                            Remove-Job $cleanupKnownHostsJob
+                                        } else {
+                                            Remove-Job $cleanupKnownHostsJob -Force
+                                            Write-Host "    [WARNING] known_hosts cleanup timed out after 15 seconds" -ForegroundColor Yellow
+                                        }
                                         
                                         # Copy known_hosts to remote system
                                         $copyKnownHostsCommand = "echo '$knownHostsBase64' | base64 -d > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts && echo KNOWN_HOSTS_COPIED"
-                                        $knownHostsCopyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $copyKnownHostsCommand 2>&1
+                                        $copyKnownHostsJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $copyKnownHostsCommand
+                                        
+                                        if (Wait-Job $copyKnownHostsJob -Timeout 15) {
+                                            $knownHostsCopyResult = Receive-Job $copyKnownHostsJob
+                                            Remove-Job $copyKnownHostsJob
+                                        } else {
+                                            Remove-Job $copyKnownHostsJob -Force
+                                            $knownHostsCopyResult = "known_hosts copy timed out after 15 seconds"
+                                        }
                                         
                                         if ($knownHostsCopyResult -match "KNOWN_HOSTS_COPIED") {
                                             # Verify the known_hosts was actually copied as a file
                                             $verifyKnownHostsCommand = "test -f ~/.ssh/known_hosts && echo KNOWN_HOSTS_FILE_EXISTS || echo KNOWN_HOSTS_FILE_MISSING"
-                                            $knownHostsVerifyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $verifyKnownHostsCommand 2>&1
+                                            $verifyKnownHostsJob = Start-Job -ScriptBlock {
+                                                param($sshKeyPath, $remoteHost, $command)
+                                                $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                                return $result
+                                            } -ArgumentList $sshKeyPath, $remoteHost, $verifyKnownHostsCommand
+                                            
+                                            if (Wait-Job $verifyKnownHostsJob -Timeout 15) {
+                                                $knownHostsVerifyResult = Receive-Job $verifyKnownHostsJob
+                                                Remove-Job $verifyKnownHostsJob
+                                            } else {
+                                                Remove-Job $verifyKnownHostsJob -Force
+                                                $knownHostsVerifyResult = "known_hosts verification timed out after 15 seconds"
+                                            }
                                             
                                             if ($knownHostsVerifyResult -match "KNOWN_HOSTS_FILE_EXISTS") {
                                                 Write-Host "    [SUCCESS] known_hosts file copied and verified as file on remote system" -ForegroundColor Green
@@ -1990,11 +2074,35 @@ echo "SCRIPT_END"
                                         Write-Host "    [INFO] known_hosts file not found, creating empty one on remote" -ForegroundColor Cyan
                                         # Remove any existing directory and create empty file
                                         $createKnownHostsCommand = "rm -rf ~/.ssh/known_hosts && touch ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts"
-                                        & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $createKnownHostsCommand 2>&1 | Out-Null
+                                        $createKnownHostsJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $createKnownHostsCommand
+                                        
+                                        if (Wait-Job $createKnownHostsJob -Timeout 15) {
+                                            Receive-Job $createKnownHostsJob | Out-Null
+                                            Remove-Job $createKnownHostsJob
+                                        } else {
+                                            Remove-Job $createKnownHostsJob -Force
+                                            Write-Host "    [WARNING] known_hosts creation timed out after 15 seconds" -ForegroundColor Yellow
+                                        }
                                         
                                         # Verify it was created as a file
                                         $verifyKnownHostsCommand = "test -f ~/.ssh/known_hosts && echo KNOWN_HOSTS_FILE_EXISTS || echo KNOWN_HOSTS_FILE_MISSING"
-                                        $knownHostsVerifyResult = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $verifyKnownHostsCommand 2>&1
+                                        $verifyKnownHostsJob = Start-Job -ScriptBlock {
+                                            param($sshKeyPath, $remoteHost, $command)
+                                            $result = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=10 -o BatchMode=yes $remoteHost $command 2>&1
+                                            return $result
+                                        } -ArgumentList $sshKeyPath, $remoteHost, $verifyKnownHostsCommand
+                                        
+                                        if (Wait-Job $verifyKnownHostsJob -Timeout 15) {
+                                            $knownHostsVerifyResult = Receive-Job $verifyKnownHostsJob
+                                            Remove-Job $verifyKnownHostsJob
+                                        } else {
+                                            Remove-Job $verifyKnownHostsJob -Force
+                                            $knownHostsVerifyResult = "known_hosts verification timed out after 15 seconds"
+                                        }
                                         
                                         if ($knownHostsVerifyResult -match "KNOWN_HOSTS_FILE_EXISTS") {
                                             Write-Host "    [SUCCESS] Empty known_hosts file created on remote system" -ForegroundColor Green
@@ -2241,7 +2349,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
     Write-Host "    [INFO] Scanning remote host for available repositories..." -ForegroundColor Cyan
     
     # Define the base path on remote host where repositories are stored
-    $remoteRepoPath = "/home/php-workstation/Schreibtisch/IMPACT/Models"
+    $remoteRepoPath = "/home/php-workstation/Schreibtisch/Repositories"
     Write-Debug-Message "[DEBUG] Remote repository base path: $remoteRepoPath"
     #$remoteHost = "php_workstation@$($script:RemoteHostIp)" TODO: CHECK IF NEEDED
     
@@ -2988,8 +3096,8 @@ Host docker-$sshHostname
         if ($remoteHost -match "^(.+)@(.+)$") {
             $sshUser = $matches[1]
             $sshHostname = $matches[2]
-            $dockerSshHost = "ssh://docker-$sshHostname"
-            Write-Host "    [INFO] Using SSH config alias: docker-$sshHostname" -ForegroundColor Cyan
+            $dockerSshHost = "ssh://$sshUser@$sshHostname"
+            Write-Host "    [INFO] Using SSH config alias: $sshUser@$sshHostname" -ForegroundColor Cyan
         } else {
             $dockerSshHost = "ssh://$remoteHost"
         }
@@ -4663,6 +4771,9 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
 $CONTAINER_NAME = "$($script:SelectedRepo)_$USERNAME"
 Write-Debug-Message "[DEBUG] Container name set to: $CONTAINER_NAME"
 
+# Initialize script-level variable to store used ports (those mapped to 8787)
+$script:UsedPorts = @()
+
 # Check for existing containers with the username
 Write-Debug-Message "[DEBUG] STEP 5: Starting container status check for user: $USERNAME"
 Write-Host ""
@@ -4680,14 +4791,37 @@ try {
     Set-DockerSSHEnvironment
     Write-Debug-Message "[DEBUG] SSH environment configured for Docker operations"
     
+    # First, check ALL running containers to identify used ports (not just user-specific containers)
+    Write-Debug-Message "[DEBUG] Checking all running containers for port usage"
+    if ($CONTAINER_LOCATION -eq "LOCAL") {
+        $allRunningContainers = & docker ps --format "{{.Names}}\t{{.Ports}}" 2>$null
+    } else {
+        $allRunningContainers = & docker --context $script:RemoteContextName ps --format "{{.Names}}\t{{.Ports}}" 2>$null
+    }
+    
+    # Parse all running containers to extract ports mapped to 8787
+    if ($LASTEXITCODE -eq 0 -and $allRunningContainers) {
+        $allContainerLines = $allRunningContainers -split "`n" | Where-Object { $_.Trim() -ne "" }
+        foreach ($containerLine in $allContainerLines) {
+            # Port format: 0.0.0.0:8787->8787/tcp or 0.0.0.0:8788->8787/tcp
+            if ($containerLine -match '0\.0\.0\.0:(\d{4})->8787/tcp') {
+                $portNumber = $matches[1]
+                if ($script:UsedPorts -notcontains $portNumber) {
+                    $script:UsedPorts += $portNumber
+                    Write-Debug-Message "[DEBUG] Found port $portNumber mapped to 8787 (from all containers)"
+                }
+            }
+        }
+    }
+    
     # Get all containers (running and stopped) that contain the username
     if ($CONTAINER_LOCATION -eq "LOCAL") {
         Write-Debug-Message "[DEBUG] Checking local Docker containers for user: $USERNAME"
-        $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+        $existingContainers = & docker ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}" 2>$null
     } else {
         Write-Debug-Message "[DEBUG] Checking remote Docker containers using context: $script:RemoteContextName"
         # For remote, use the context we set up
-        $existingContainers = & docker --context $script:RemoteContextName ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>$null
+        $existingContainers = & docker --context $script:RemoteContextName ps -a --filter "name=_$USERNAME" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}" 2>$null
     }
     
     Write-Debug-Message "[DEBUG] Docker ps command exit code: $LASTEXITCODE"
@@ -4720,6 +4854,12 @@ try {
             }
             Write-Host "  " + ("=" * 80)
             Write-Host ""
+            
+            # Display summary of used ports (from all containers, not just user-specific)
+            if ($script:UsedPorts.Count -gt 0) {
+                Write-Host "[INFO] Ports currently mapped to 8787 (across all containers): $($script:UsedPorts -join ', ')" -ForegroundColor Cyan
+                Write-Host ""
+            }
             
             # Check specifically for running containers
             if ($CONTAINER_LOCATION -eq "LOCAL") {
@@ -4831,23 +4971,40 @@ Write-Host "  Selected Repository: $($script:SelectedRepo)"
 Write-Host "  Username: $USERNAME"
 Write-Host ""
 
-# Check if the specific container is currently running
+# Check if the specific container is currently running and retrieve its details
 $isContainerRunning = $false
+$existingContainerPort = $null
+$existingContainerUrl = $null
 try {
     # Ensure SSH environment is set for remote Docker operations
     Set-DockerSSHEnvironment
     
     if ($CONTAINER_LOCATION -eq "LOCAL") {
-        $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        $runningCheck = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
     } else {
-        $runningCheck = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}" 2>$null
+        $runningCheck = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
     }
     if ($null -eq $runningCheck) {
         $runningCheck = "this_container_does_not_exist" # Default to non-matching string
     }
-    if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
+    if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -match "^$CONTAINER_NAME") {
         $isContainerRunning = $true
-        Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING" -ForegroundColor Cyan
+        
+        # Extract port information from the running container
+        if ($runningCheck -match '0\.0\.0\.0:(\d{4})->8787/tcp') {
+            $existingContainerPort = $matches[1]
+            Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING on port $existingContainerPort" -ForegroundColor Green
+            
+            # Build the access URL for the existing container
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                $existingContainerUrl = "http://localhost:$existingContainerPort"
+            } else {
+                $existingContainerUrl = "http://$($script:RemoteHostIp):$existingContainerPort"
+            }
+            Write-Host "[INFO] Access URL: $existingContainerUrl" -ForegroundColor Cyan
+        } else {
+            Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING (port info not detected)" -ForegroundColor Cyan
+        }
     } else {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist" -ForegroundColor Cyan
     }
@@ -4859,10 +5016,10 @@ Write-Host ""
 Write-Host "Creating container management interface..."
 Write-Host ""
 
-# Create the main container management form
+# Create the main container management form (size adjusts if container is running)
 $formContainer = New-Object System.Windows.Forms.Form -Property @{ 
     Text = 'Container Management - IMPACT NCD Germany'
-    Size = New-Object System.Drawing.Size(500,480)
+    Size = New-Object System.Drawing.Size(500,$(if ($isContainerRunning) { 505 } else { 480 }))
     FormBorderStyle = 'FixedDialog'
     MaximizeBox = $false
 }
@@ -4911,6 +5068,18 @@ $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans
 if ($isContainerRunning) {
     $labelInstruction.SelectionColor = [System.Drawing.Color]::Green
     $labelInstruction.AppendText("RUNNING")
+    
+    # Add access URL information if container is already running
+    if ($existingContainerUrl) {
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Black
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.AppendText("`n`n")
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
+        $labelInstruction.AppendText("Access your running container at:`n")
+        $labelInstruction.SelectionFont = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+        $labelInstruction.SelectionColor = [System.Drawing.Color]::Blue
+        $labelInstruction.AppendText("$existingContainerUrl")
+    }
 } else {
     $labelInstruction.SelectionColor = [System.Drawing.Color]::Red
     $labelInstruction.AppendText("STOPPED")
@@ -4918,13 +5087,13 @@ if ($isContainerRunning) {
 
 $formContainer.Controls.Add($labelInstruction)
 
-# Start button
+# Start/Access button (text changes based on container state)
 $buttonStart = New-Object System.Windows.Forms.Button -Property @{
-    Text = 'Start Container'
+    Text = $(if ($isContainerRunning) { 'Access Container' } else { 'Start Container' })
     Location = New-Object System.Drawing.Point(100,165)
     Size = New-Object System.Drawing.Size(120,40)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
-    Enabled = -not $isContainerRunning
+    Enabled = $true
 }
 $formContainer.Controls.Add($buttonStart)
 
@@ -4938,10 +5107,27 @@ $buttonStop = New-Object System.Windows.Forms.Button -Property @{
 }
 $formContainer.Controls.Add($buttonStop)
 
+# Session info label (if container is running)
+if ($isContainerRunning) {
+    $labelSessionInfo = New-Object System.Windows.Forms.Label -Property @{ 
+        Text = "💡 Your session is persistent - you can close this window and reconnect anytime!"
+        Location = New-Object System.Drawing.Point(10,220)
+        Size = New-Object System.Drawing.Size(470,20)
+        Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 8, [System.Drawing.FontStyle]::Italic)
+        ForeColor = [System.Drawing.Color]::DarkGreen
+    }
+    $formContainer.Controls.Add($labelSessionInfo)
+    
+    # Adjust positions for controls below
+    $advancedOptionsYPosition = 245
+} else {
+    $advancedOptionsYPosition = 220
+}
+
 # Advanced Options section
 $labelAdvanced = New-Object System.Windows.Forms.Label -Property @{ 
     Text = "Advanced Options:"
-    Location = New-Object System.Drawing.Point(10,220)
+    Location = New-Object System.Drawing.Point(10,$advancedOptionsYPosition)
     Size = New-Object System.Drawing.Size(470,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Bold)
 }
@@ -4950,7 +5136,7 @@ $formContainer.Controls.Add($labelAdvanced)
 # Checkbox option
 $checkBoxVolumes = New-Object System.Windows.Forms.CheckBox -Property @{
     Text = 'Use Docker Volumes'
-    Location = New-Object System.Drawing.Point(20,245)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 270 } else { 245 }))
     Size = New-Object System.Drawing.Size(150,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
@@ -4959,21 +5145,30 @@ $formContainer.Controls.Add($checkBoxVolumes)
 # Rebuild image checkbox option
 $checkBoxRebuild = New-Object System.Windows.Forms.CheckBox -Property @{
     Text = 'Rebuild Docker image for repository'
-    Location = New-Object System.Drawing.Point(175,245)
+    Location = New-Object System.Drawing.Point(175,$(if ($isContainerRunning) { 270 } else { 245 }))
     Size = New-Object System.Drawing.Size(250,20)
     Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
 }
 $formContainer.Controls.Add($checkBoxRebuild)
 
+# High computational demand checkbox option
+$checkBoxHighCompute = New-Object System.Windows.Forms.CheckBox -Property @{
+    Text = 'High computational demand'
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 295 } else { 270 }))
+    Size = New-Object System.Drawing.Size(200,20)
+    Font = New-Object System.Drawing.Font("Microsoft Sans Serif", 9, [System.Drawing.FontStyle]::Regular)
+}
+$formContainer.Controls.Add($checkBoxHighCompute)
+
 # Port override label and textbox
 $labelPort = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Port Override:'
-    Location = New-Object System.Drawing.Point(20,280)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 330 } else { 305 }))
     Size = New-Object System.Drawing.Size(90,20)
 }
 $formContainer.Controls.Add($labelPort)
 $textBoxPort = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(110,275)
+    Location = New-Object System.Drawing.Point(110,$(if ($isContainerRunning) { 325 } else { 300 }))
     Size = New-Object System.Drawing.Size(100,20)
     Text = '8787'
 }
@@ -4982,12 +5177,12 @@ $formContainer.Controls.Add($textBoxPort)
 # Custom parameters label and textbox
 $labelParams = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'Custom Parameters:'
-    Location = New-Object System.Drawing.Point(20,315)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 365 } else { 340 }))
     Size = New-Object System.Drawing.Size(120,20)
 }
 $formContainer.Controls.Add($labelParams)
 $textBoxParams = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(140,310)
+    Location = New-Object System.Drawing.Point(140,$(if ($isContainerRunning) { 360 } else { 335 }))
     Size = New-Object System.Drawing.Size(200,20)
     Text = ''
 }
@@ -4996,12 +5191,12 @@ $formContainer.Controls.Add($textBoxParams)
 # sim_design.yaml file label and textbox
 $labelSimDesign = New-Object System.Windows.Forms.Label -Property @{ 
     Text = 'sim_design.yaml file used for directories:'
-    Location = New-Object System.Drawing.Point(20,350)
+    Location = New-Object System.Drawing.Point(20,$(if ($isContainerRunning) { 400 } else { 375 }))
     Size = New-Object System.Drawing.Size(230,20)
 }
 $formContainer.Controls.Add($labelSimDesign)
 $textBoxSimDesign = New-Object System.Windows.Forms.TextBox -Property @{ 
-    Location = New-Object System.Drawing.Point(250,345)
+    Location = New-Object System.Drawing.Point(250,$(if ($isContainerRunning) { 395 } else { 370 }))
     Size = New-Object System.Drawing.Size(220,20)
     Text = '..\inputs\sim_design.yaml'
 }
@@ -5010,14 +5205,14 @@ $formContainer.Controls.Add($textBoxSimDesign)
 # OK and Cancel buttons
 $buttonOK = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Close'
-    Location = New-Object System.Drawing.Point(300,390)
+    Location = New-Object System.Drawing.Point(300,$(if ($isContainerRunning) { 415 } else { 390 }))
     Size = New-Object System.Drawing.Size(75,30)
 }
 $formContainer.Controls.Add($buttonOK)
 
 $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
     Text = 'Cancel'
-    Location = New-Object System.Drawing.Point(395,390)
+    Location = New-Object System.Drawing.Point(395,$(if ($isContainerRunning) { 415 } else { 390 }))
     Size = New-Object System.Drawing.Size(75,30)
     DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 }
@@ -5149,6 +5344,7 @@ function Update-InstructionText {
 
 # Declare variables at form scope so both event handlers can access them
 $script:UseVolumes = $false
+$script:HighComputeDemand = $false
 $script:OutputDir = $null
 $script:SynthpopDir = $null
 $script:VolumeOutput = $null
@@ -5159,7 +5355,81 @@ $script:RsyncImage = $null
 
 # Event handlers
 $buttonStart.Add_Click({
+    # First check if container is already running (session recovery)
     Write-Host ""
+    Write-Host "[INFO] Checking container status..." -ForegroundColor Cyan
+    Write-Host "  Container: $CONTAINER_NAME"
+    Write-Host ""
+    
+    try {
+        Set-DockerSSHEnvironment
+        $containerCheckResult = $null
+        
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            $containerCheckResult = & docker ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
+        } else {
+            $containerCheckResult = & docker --context $script:RemoteContextName ps --filter "name=^${CONTAINER_NAME}$" --format "{{.Names}}	{{.Ports}}" 2>$null
+        }
+        
+        if ($LASTEXITCODE -eq 0 -and $containerCheckResult -and $containerCheckResult.Trim() -match "^$CONTAINER_NAME") {
+            # Container is already running - provide access information
+            Write-Host "[INFO] Container '$CONTAINER_NAME' is already RUNNING!" -ForegroundColor Green
+            
+            # Extract port and build URL
+            $portNumber = "8787"
+            if ($containerCheckResult -match '0\.0\.0\.0:(\d{4})->8787/tcp') {
+                $portNumber = $matches[1]
+            }
+            
+            $accessUrl = if ($CONTAINER_LOCATION -eq "LOCAL") {
+                "http://localhost:$portNumber"
+            } else {
+                "http://$($script:RemoteHostIp):$portNumber"
+            }
+            
+            Write-Host "[INFO] Container details:" -ForegroundColor Cyan
+            Write-Host "  URL: $accessUrl" -ForegroundColor Cyan
+            Write-Host "  Username: rstudio" -ForegroundColor Cyan
+            Write-Host "  Password: $PASSWORD" -ForegroundColor Cyan
+            Write-Host ""
+            
+            # Show info dialog with access details and option to open browser
+            $resumeMessage = "Your container is already running!`n`n" +
+                           "You can continue your work session by accessing:`n`n" +
+                           "URL: $accessUrl`n" +
+                           "Username: rstudio`n" +
+                           "Password: $PASSWORD`n`n" +
+                           "Container: $CONTAINER_NAME`n" +
+                           "Location: $CONTAINER_LOCATION`n`n" +
+                           "Would you like to open the RStudio Server in your browser?"
+            
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                $resumeMessage,
+                "Resume Existing Session - $CONTAINER_NAME",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+            
+            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+                Write-Host "[INFO] Opening browser to access RStudio Server..." -ForegroundColor Cyan
+                Start-Process $accessUrl
+            }
+            
+            Write-Host "[INFO] Session resumed - container continues running" -ForegroundColor Green
+            Write-Host ""
+            
+            # Update UI to reflect running state
+            $buttonStart.Text = 'Access Container'
+            $buttonStop.Enabled = $true
+            Update-InstructionText -Status "RUNNING" -Location $CONTAINER_LOCATION -VolumesInfo $(if($checkBoxVolumes.Checked) { "Enabled" } else { "Disabled" })
+            
+            return  # Exit the click handler without starting new container
+        }
+    } catch {
+        Write-Host "[WARNING] Error checking container status: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "[INFO] Proceeding with container startup..." -ForegroundColor Cyan
+    }
+    
     Write-Host "[INFO] Container is starting up..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
     
@@ -5168,13 +5438,32 @@ $buttonStart.Add_Click({
     $useVolumes = $script:UseVolumes  # Keep local copy for backwards compatibility
     $script:RebuildImage = $checkBoxRebuild.Checked
     $rebuildImage = $script:RebuildImage  # Keep local copy for backwards compatibility
+    $script:HighComputeDemand = $checkBoxHighCompute.Checked
+    $highComputeDemand = $script:HighComputeDemand  # Keep local copy for backwards compatibility
     $portOverride = $textBoxPort.Text.Trim()
     $customParams = $textBoxParams.Text.Trim()
     $SimDesignYAML = $textBoxSimDesign.Text.Trim()
     
+    # Validate port override is not already in use
+    if ($portOverride -and $script:UsedPorts -contains $portOverride) {
+        Write-Host "[ERROR] Port $portOverride is already in use by another container!" -ForegroundColor Red
+        Write-Host "  Ports currently in use: $($script:UsedPorts -join ', ')" -ForegroundColor Yellow
+        Write-Host ""
+        [System.Windows.Forms.MessageBox]::Show(
+            "Port $portOverride is already in use by another container!`n`n" +
+            "Ports currently mapped to 8787:`n$($script:UsedPorts -join ', ')`n`n" +
+            "Please select a different port number between 8787 and 8800 that is not in use.",
+            "Port Conflict - $portOverride",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        )
+        return  # Exit the button click handler without starting container
+    }
+    
     Write-Host "  Advanced Options:"
     Write-Host "    Use Volumes: $useVolumes"
     Write-Host "    Rebuild Image: $rebuildImage"
+    Write-Host "    High Computational Demand: $highComputeDemand"
     Write-Host "    Port Override: $(if($portOverride) { $portOverride } else { 'Default' })"
     Write-Host "    Custom Parameters: $(if($customParams) { $customParams } else { 'None' })"
     Write-Host "    sim_design.yaml file: $(if($SimDesignYAML) { $SimDesignYAML } else { 'Default' })"
@@ -6118,11 +6407,23 @@ RUN apk add --no-cache rsync
             "--workdir", "/home/rstudio/$script:SelectedRepo"
         )
         
-        # Add customParams if specified
-        if ($null -ne $customParams) {
-            $customParamsArray = $customParams -split '\s+'
-            $dockerArgs += $customParamsArray
+        # Add computational resource limits for remote high-demand containers
+        if ($CONTAINER_LOCATION -ne "LOCAL" -and $highComputeDemand) {
+            Write-Host "[INFO] Applying high computational resource limits for remote container..." -ForegroundColor Cyan
+            $dockerArgs += "--cpus"
+            $dockerArgs += "32"  # Limit to 32 CPU cores
+            $dockerArgs += "-m"
+            $dockerArgs += "384g"  # Limit to 384GB memory
+            Write-Host "  CPU Limit: 32 cores" -ForegroundColor Cyan
+            Write-Host "  Memory Limit: 384GB" -ForegroundColor Cyan
+            Write-Host ""
         }
+        
+        # Add customParams if specified
+        #if ($null -ne $customParams) {
+        #    $customParamsArray = $customParams -split '\s+'
+        #    $dockerArgs += $customParamsArray
+        #}
 
         # Add final argument
         $dockerArgs += $DockerImageName
@@ -6292,11 +6593,23 @@ RUN apk add --no-cache rsync
             )
         }
 
-        # Add customParams if specified
-        if ($null -ne $customParams) {
-            $customParamsArray = $customParams -split '\s+'
-            $dockerArgs += $customParamsArray
+        # Add computational resource limits for remote high-demand containers
+        if ($CONTAINER_LOCATION -ne "LOCAL" -and $highComputeDemand) {
+            Write-Host "[INFO] Applying high computational resource limits for remote container..." -ForegroundColor Cyan
+            $dockerArgs += "--cpus"
+            $dockerArgs += "32"  # Limit to 32 CPU cores
+            $dockerArgs += "-m"
+            $dockerArgs += "384g"  # Limit to 384GB memory
+            Write-Host "  CPU Limit: 32 cores" -ForegroundColor Cyan
+            Write-Host "  Memory Limit: 384GB" -ForegroundColor Cyan
+            Write-Host ""
         }
+        
+        # Add customParams if specified
+        #if ($null -ne $customParams) {
+        #    $customParamsArray = $customParams -split '\s+'
+        #    $dockerArgs += $customParamsArray
+        #}
 
         # Add final argument (Docker image name)
         $dockerArgs += $DockerImageName
