@@ -5532,7 +5532,7 @@ $buttonStart.Add_Click({
                 Write-Host ""
 
                 # Build the Docker command as a single string for cmd /c execution
-                $dockerCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache --progress=plain `"$dockerContextPath`""
+                $dockerCommand = "docker build --build-arg REPO_NAME=$script:SelectedRepo -f `"$dockerfilePath`" -t $DockerImageName --no-cache --progress=plain `"$dockerContextPath`""
                 Write-Debug-Message "[DEBUG] Docker command: $dockerCommand"
                 Write-Host ""
 
@@ -5550,6 +5550,7 @@ $buttonStart.Add_Click({
                     # This allows Docker to write directly to the console
                     $arguments = @(
                         "build"
+                        "--build-arg", "REPO_NAME=$script:SelectedRepo"
                         "-f"
                         "`"$dockerfilePath`""
                         "-t"
@@ -5591,7 +5592,7 @@ $buttonStart.Add_Click({
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
                 Write-Host ""
                 $remoteHost = "php-workstation@$($script:RemoteHostIp)"
-                $buildCommand = "cd '$dockerContextPath' && docker buildx build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
+                $buildCommand = "cd '$dockerContextPath' && docker buildx build --build-arg REPO_NAME=$script:SelectedRepo -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
                 Write-Host ""
 
                 # Execute remote Docker build with real-time output
@@ -5843,7 +5844,7 @@ $buttonStart.Add_Click({
                                     Write-Host ""
 
                                     # Build the Docker command for retry
-                                    $retryCommand = "docker build -f `"$dockerfilePath`" -t $DockerImageName --no-cache --progress=plain `"$dockerContextPath`""
+                                    $retryCommand = "docker build --build-arg REPO_NAME=$script:SelectedRepo -f `"$dockerfilePath`" -t $DockerImageName --no-cache --progress=plain `"$dockerContextPath`""
                                     Write-Debug-Message "[DEBUG] Retry command: $retryCommand"
                                     Write-Host ""
 
@@ -5860,6 +5861,7 @@ $buttonStart.Add_Click({
                                         # Use Start-Process without output redirection for true real-time display
                                         $dockerArguments = @(
                                             "build"
+                                            "--build-arg", "REPO_NAME=$script:SelectedRepo"
                                             "-f", "`"$dockerfilePath`""
                                             "-t", $DockerImageName
                                             "--no-cache"
@@ -5898,7 +5900,7 @@ $buttonStart.Add_Click({
                                     # Remote build retry with real-time output
                                     Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
                                     $remoteHost = "php-workstation@$($script:RemoteHostIp)"
-                                    $retryBuildCommand = "cd '$dockerContextPath' && docker buildx build -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
+                                    $retryBuildCommand = "cd '$dockerContextPath' && docker buildx build --build-arg REPO_NAME=$script:SelectedRepo -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
 
                                     # Execute remote retry build with real-time output
                                     Write-Host "[INFO] Retrying main image build on remote host (should be faster with prerequisite)..." -ForegroundColor Cyan
