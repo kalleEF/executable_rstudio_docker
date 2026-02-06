@@ -35,6 +35,27 @@ param(
 $script:DebugMode = $false
 $script:UseDirectSshForDocker = $false  # Flag for Docker context SSH limitations
 $script:UserWantsPS7 = $false  # Flag to track PowerShell 7 preference for elevation
+$script:RemoteUser = 'php-workstation'  # Default remote Linux user
+$script:RemoteRepoBasePath = "/home/$($script:RemoteUser)/Schreibtisch/Repositories"  # Default remote repo root
+
+# Helper to build the remote host string consistently
+function Get-RemoteHostString {
+    param([string]$Ip)
+    if ([string]::IsNullOrWhiteSpace($Ip)) { return $null }
+    return "$($script:RemoteUser)@$Ip"
+}
+
+# Helper to build remote SSH key path for the given app username
+function Get-RemoteSshKeyPath {
+    param([string]$User)
+    if ([string]::IsNullOrWhiteSpace($User)) { $User = $USERNAME }
+    return "/home/$($script:RemoteUser)/.ssh/id_ed25519_$User"
+}
+
+# Helper to build remote known_hosts path
+function Get-RemoteKnownHostsPath {
+    return "/home/$($script:RemoteUser)/.ssh/known_hosts"
+}
 
 # Debug write function that respects the global debug flag
 function Write-Debug-Message {
@@ -1194,7 +1215,7 @@ $buttonRemote.Add_Click({
     Write-Host "  Using remote IP address: $userProvidedIP" -ForegroundColor Cyan
     
     # Define remote host using user-provided IP (update this IP address to match your workstation)
-    $remoteHost = "php-workstation@$userProvidedIP"  #TODO: Implement individual users!
+    $remoteHost = Get-RemoteHostString -Ip $userProvidedIP
     Write-Debug-Message "[DEBUG] Target remote host: $remoteHost"
  
     # Test SSH connection with detailed feedback
@@ -2349,7 +2370,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
     Write-Host "    [INFO] Scanning remote host for available repositories..." -ForegroundColor Cyan
     
     # Define the base path on remote host where repositories are stored
-    $remoteRepoPath = "/home/php-workstation/Schreibtisch/Repositories"
+    $remoteRepoPath = $script:RemoteRepoBasePath
     Write-Debug-Message "[DEBUG] Remote repository base path: $remoteRepoPath"
     #$remoteHost = "php_workstation@$($script:RemoteHostIp)" TODO: CHECK IF NEEDED
     
@@ -2367,7 +2388,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
             Write-Debug-Message "[DEBUG] Remote host variable empty, reconstructing from stored IP"
             # Reconstruct the remote host from the IP we stored earlier
             if ($script:RemoteHostIp) {
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 Write-Debug-Message "[DEBUG] Reconstructed remote host: $remoteHost"
                 Write-Host ""
                 Write-Host "    [INFO] Reconstructed remote host: $remoteHost" -ForegroundColor Cyan
@@ -2573,7 +2594,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
         # Ensure we're using the correct remote host for verification
         if ([string]::IsNullOrEmpty($remoteHost)) {
             if ($script:RemoteHostIp) {
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 Write-Host ""
                 Write-Host "    [INFO] Using remote host: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
@@ -2656,7 +2677,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
         # Ensure we have the correct remote host for Docker verification
         if ([string]::IsNullOrEmpty($remoteHost)) {
             if ($script:RemoteHostIp) {
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 Write-Host ""
                 Write-Host "    [INFO] Using remote host for Docker verification: $remoteHost" -ForegroundColor Cyan
                 Write-Host ""
@@ -2794,7 +2815,6 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
                         Start-Sleep -Seconds 1
                         $attempt++
                         Write-Host "    Checking remote Docker daemon status... ($attempt/$maxAttempts)" -NoNewline
-                        
                         # Use job with timeout for remote docker info check
                         $remoteCheckJob = Start-Job -ScriptBlock {
                             param($sshKeyPath, $remoteHost)
@@ -2935,7 +2955,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
     # Ensure we have the correct remote host for Docker context
     if ([string]::IsNullOrEmpty($remoteHost)) {
         if ($script:RemoteHostIp) {
-            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
             Write-Host ""
             Write-Host "    [INFO] Using remote host for Docker context: $remoteHost" -ForegroundColor Cyan
             Write-Host ""
@@ -2966,7 +2986,7 @@ if($CONTAINER_LOCATION -eq "REMOTE@$($script:RemoteHostIp)") {
         $sshUser = $matches[1]
         $sshHostname = $matches[2]
     } else {
-        $sshUser = "php-workstation"
+        $sshUser = $script:RemoteUser
         $sshHostname = $remoteHost
     }
     
@@ -3179,20 +3199,21 @@ Host docker-$sshHostname
         # Now test with Docker context (this may still prompt for password due to Docker context limitations)
         Write-Host "    [INFO] Testing Docker context (may have limitations with SSH key auth)..." -ForegroundColor Cyan
         $dockerTestOutput = & docker --context $RemoteContextName version 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "    [SUCCESS] Remote Docker connection test passed" -ForegroundColor Green
-        Write-Host "    [INFO] Docker context is working correctly" -ForegroundColor Cyan
-    } else {
-        Write-Host "    [WARNING] Docker context authentication failed (this is a known limitation)" -ForegroundColor Yellow
-        Write-Debug-Message "    Error details: $dockerTestOutput"
-        Write-Host "" 
-        Write-Host "    [INFO] Docker contexts have limitations with SSH key authentication" -ForegroundColor Cyan
-        Write-Host "    [INFO] Direct SSH commands work fine, container operations will use direct SSH" -ForegroundColor Cyan
-        Write-Host "    [INFO] This does not affect container functionality - continuing..." -ForegroundColor Cyan
         
-        # Store that we'll need to use direct SSH for Docker operations
-        $script:UseDirectSshForDocker = $true
-    }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    [SUCCESS] Remote Docker connection test passed" -ForegroundColor Green
+            Write-Host "    [INFO] Docker context is working correctly" -ForegroundColor Cyan
+        } else {
+            Write-Host "    [WARNING] Docker context authentication failed (this is a known limitation)" -ForegroundColor Yellow
+            Write-Debug-Message "    Error details: $dockerTestOutput"
+            Write-Host "" 
+            Write-Host "    [INFO] Docker contexts have limitations with SSH key authentication" -ForegroundColor Cyan
+            Write-Host "    [INFO] Direct SSH commands work fine, container operations will use direct SSH" -ForegroundColor Cyan
+            Write-Host "    [INFO] This does not affect container functionality - continuing..." -ForegroundColor Cyan
+            
+            # Store that we'll need to use direct SSH for Docker operations
+            $script:UseDirectSshForDocker = $true
+        }
     } else {
         Write-Host "    [ERROR] Docker not accessible via SSH" -ForegroundColor Red
         Write-Host "    SSH Docker test output: $dockerSshResult" -ForegroundColor Red
@@ -3632,7 +3653,7 @@ function Write-RemoteContainerMetadata {
     )
     try {
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
         $sshKeyPath = "${HOME}\.ssh\id_ed25519_${User}"
         $metaPath = Get-RemoteContainerMetadataPath -ContainerName $ContainerName
         $meta = [ordered]@{
@@ -3657,7 +3678,7 @@ function Read-RemoteContainerMetadata {
     param([string]$ContainerName, [string]$User)
     try {
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
         $sshKeyPath = "${HOME}\.ssh\id_ed25519_${User}"
         $metaPath = Get-RemoteContainerMetadataPath -ContainerName $ContainerName
         $cmd = "cat '$metaPath' 2>/dev/null"
@@ -3675,7 +3696,7 @@ function Remove-RemoteContainerMetadata {
     param([string]$ContainerName, [string]$User)
     try {
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
         $sshKeyPath = "${HOME}\.ssh\id_ed25519_${User}"
         $metaPath = Get-RemoteContainerMetadataPath -ContainerName $ContainerName
         $cmd = "rm -f '$metaPath'"
@@ -3719,8 +3740,8 @@ function Test-RemoteSSHKeyFiles {
     
     Write-Debug-Message "[DEBUG] Testing remote SSH key files for user: $Username on host: $RemoteHost"
     
-    $remoteSSHKeyPath = "/home/php-workstation/.ssh/id_ed25519_${Username}"
-    $remoteKnownHostsPath = "/home/php-workstation/.ssh/known_hosts"
+    $remoteSSHKeyPath = Get-RemoteSshKeyPath -User $Username
+    $remoteKnownHostsPath = Get-RemoteKnownHostsPath
     $localSSHKeyPath = "$HOME\.ssh\id_ed25519_$Username"
     
     Write-Debug-Message "[DEBUG] Remote private key path: $remoteSSHKeyPath"
@@ -3821,7 +3842,7 @@ function Get-YamlPathValue {
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to read the YAML file
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
         Write-Host "[INFO] Reading remote YAML file: $YamlPath" -ForegroundColor Cyan
@@ -3911,7 +3932,7 @@ function Test-AndCreateDirectory {
     if ($CONTAINER_LOCATION -like "REMOTE@*") {
         # For remote operations, use SSH to check and create directories
         Set-DockerSSHEnvironment
-        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
         
         # Use Unix path format for remote operations (no conversion needed)
@@ -4070,7 +4091,7 @@ function Get-GitRepositoryState {
         
         try {
             Set-DockerSSHEnvironment
-            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+            $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             
             Write-Debug-Message "[DEBUG] Remote git state query target: Host=$remoteHost, Key=$sshKeyPath"
@@ -4243,7 +4264,7 @@ function Invoke-GitChangeDetection {
     try {
         if ($isRemote) {
             # Handle remote repository
-            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+            $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
             $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
             Write-Debug-Message "[DEBUG] Git change detection operating on remote host '$remoteHost'"
             
@@ -4444,7 +4465,7 @@ function Show-GitCommitDialog {
         try {
             if ($isRemote) {
                 # Handle remote repository operations
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 
                 $StatusLabel.Text = "Status: Pushing to remote repository..."
@@ -4474,13 +4495,7 @@ function Show-GitCommitDialog {
                     }
                     
                     # Start SSH agent and add the key on remote host
-                    $setupSSH = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost @"
-cd '$RepoPath' && \
-eval `$(ssh-agent -s) && \
-ssh-add ~/.ssh/id_ed25519_$USERNAME 2>/dev/null && \
-export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' && \
-git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
-"@ 2>&1
+                    $setupSSH = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $sshSetupScript 2>&1
                     
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host "[SUCCESS] SSH authentication configured on remote host" -ForegroundColor Green
@@ -4518,13 +4533,7 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
                             }
                             
                             # Configure SSH for the newly converted repository
-                            $setupSSH = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost @"
-cd '$RepoPath' && \
-eval `$(ssh-agent -s) && \
-ssh-add ~/.ssh/id_ed25519_$USERNAME 2>/dev/null && \
-export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes' && \
-git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
-"@ 2>&1
+                            $setupSSH = & ssh -i $sshKeyPath -o IdentitiesOnly=yes -o ConnectTimeout=30 -o BatchMode=yes $remoteHost $sshSetupScript 2>&1
                             
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host "[SUCCESS] SSH authentication configured after conversion" -ForegroundColor Green
@@ -4746,7 +4755,7 @@ git config core.sshCommand 'ssh -i ~/.ssh/id_ed25519_$USERNAME -o IdentitiesOnly
         try {
             if ($isRemote) {
                 # Handle remote repository commit
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 
                 # Commit the changes on remote
@@ -5120,6 +5129,24 @@ try {
                 if ($runtimeInfo.Port) { $recoveredPortOverride = $runtimeInfo.Port }
             }
         }
+        
+        # Notify user about recovered running container credentials
+        $recoveredPortDisplay = if ($recoveredPortOverride) { $recoveredPortOverride } else { "8787" }
+        $passwordDisplay = if ($PASSWORD) { $PASSWORD } else { "<not recovered>" }
+        $hostHint = if ($CONTAINER_LOCATION -eq "LOCAL") {
+            "http://localhost:$recoveredPortDisplay"
+        } elseif ($script:RemoteHostIp) {
+            "http://$($script:RemoteHostIp):$recoveredPortDisplay"
+        } else {
+            "Remote host (port $recoveredPortDisplay)"
+        }
+        $recoveredMessage = "Container '$CONTAINER_NAME' is already running.`n`nRecovered connection details:`n- Username: rstudio`n- Password: $passwordDisplay`n- Port: $recoveredPortDisplay`n- Host: $hostHint`n`nYou can reconnect using these details."
+        [void][System.Windows.Forms.MessageBox]::Show(
+            $recoveredMessage,
+            "Container Already Running",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
     } else {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist" -ForegroundColor Cyan
     }
@@ -5313,7 +5340,7 @@ $buttonCancel = New-Object System.Windows.Forms.Button -Property @{
 }
 $formContainer.Controls.Add($buttonCancel)
 
-# Add form closing event handler to check if container is running
+# Add form closing event handler to warn if container is running but allow exit
 $formContainer.Add_FormClosing({
     param(
         [object]$sender,
@@ -5340,23 +5367,26 @@ $formContainer.Add_FormClosing({
             $currentlyRunning = $true
         }
     } catch {
-        # If we can't check, assume it might be running to be safe
+        # If we can't check, err on the side of warning but still allow close
         Write-Debug-Message "[DEBUG] Could not check container status during form close: $($_.Exception.Message)"
         $currentlyRunning = $false
     }
     
-    # If container is running, show warning and cancel the close
+    # If container is running, show warning and let user decide
     if ($currentlyRunning) {
-        [void][System.Windows.Forms.MessageBox]::Show(
-            "The container '$CONTAINER_NAME' is still RUNNING.`n`nPlease stop the container before closing!`n`nClick 'Stop Container' to stop it, then try closing again.",
+        $closeChoice = [System.Windows.Forms.MessageBox]::Show(
+            "The container '$CONTAINER_NAME' is still RUNNING.`n`nClosing the interface will NOT stop the container.`n`nAre you sure you want to close?",
             "Container Still Running",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         )
         
-        # Cancel the form closing event
-        $formClosingEventArgs.Cancel = $true
-        Write-Host "[WARNING] Form close cancelled - container '$CONTAINER_NAME' is still running" -ForegroundColor Yellow
+        if ($closeChoice -eq [System.Windows.Forms.DialogResult]::No) {
+            $formClosingEventArgs.Cancel = $true
+            Write-Host "[INFO] Form close cancelled - user chose to keep the interface open while container runs" -ForegroundColor Cyan
+        } else {
+            Write-Host "[INFO] Interface closed while container '$CONTAINER_NAME' continues to run" -ForegroundColor Yellow
+        }
     } else {
         Write-Host "[INFO] Container management form closing - no running containers detected" -ForegroundColor Cyan
     }
@@ -5454,7 +5484,7 @@ $buttonStart.Add_Click({
     Write-Host "[INFO] Container is starting up..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
     if ($CONTAINER_LOCATION -ne "LOCAL") {
-        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
     }
 
     # New container start is not a recovered session
@@ -5640,7 +5670,7 @@ $buttonStart.Add_Click({
             if ($CONTAINER_LOCATION -eq "LOCAL") {
                 $dockerfileExists = Test-Path $dockerfilePath
             } else {
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                 $dockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -f '$dockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                 $dockerfileExists = $dockerfileCheck -match "EXISTS"
@@ -5738,7 +5768,7 @@ $buttonStart.Add_Click({
                 Write-Host ""
                 Write-Host "[BUILD] Starting remote Docker build via SSH..."
                 Write-Host ""
-                $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                 $buildCommand = "cd '$dockerContextPath' && docker buildx build --build-arg REPO_NAME=$script:SelectedRepo -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
                 Write-Host ""
 
@@ -5831,7 +5861,7 @@ $buttonStart.Add_Click({
                     if ($CONTAINER_LOCATION -eq "LOCAL") {
                         $prereqDockerfileExists = Test-Path $prereqDockerfilePath
                     } else {
-                        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                        $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                         $sshKeyPath = "$HOME\.ssh\id_ed25519_$USERNAME"
                         $prereqDockerfileCheck = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost "test -f '$prereqDockerfilePath' && echo 'EXISTS' || echo 'NOT_EXISTS'" 2>&1
                         $prereqDockerfileExists = $prereqDockerfileCheck -match "EXISTS"
@@ -5913,7 +5943,7 @@ $buttonStart.Add_Click({
                         } else {
                             # Remote build of prerequisite with real-time output
                             Write-Host "[DOCKER-PREREQ] Building prerequisite image on remote host..."
-                            $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                            $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                             $prereqBuildCommand = "cd '$prereqDockerContextPath' && docker buildx build -f '$prereqDockerfilePath' -t '$prereqImageName' --no-cache --progress=plain . 2>&1"
 
                             # Execute remote prerequisite build with real-time output
@@ -6046,7 +6076,7 @@ $buttonStart.Add_Click({
                                 } else {
                                     # Remote build retry with real-time output
                                     Write-Host "[DOCKER-RETRY-REMOTE] Retrying main image build on remote host..."
-                                    $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+                                    $remoteHost = Get-RemoteHostString -Ip $script:RemoteHostIp
                                     $retryBuildCommand = "cd '$dockerContextPath' && docker buildx build --build-arg REPO_NAME=$script:SelectedRepo -f '$dockerfilePath' -t '$DockerImageName' --no-cache --progress=plain . 2>&1"
 
                                     # Execute remote retry build with real-time output
@@ -6282,8 +6312,8 @@ $buttonStart.Add_Click({
             $knownHostsPath = "${HOME}\.ssh\known_hosts"
         } else {
             # Configure SSH key paths for Linux (remote host)
-            $sshKeyPath = "/home/php-workstation/.ssh/id_ed25519_${USERNAME}"
-            $knownHostsPath = "/home/php-workstation/.ssh/known_hosts"
+            $sshKeyPath = Get-RemoteSshKeyPath -User $USERNAME
+            $knownHostsPath = Get-RemoteKnownHostsPath
         }
         
         # Build rsync-alpine image if it doesn't already exist.
@@ -6300,20 +6330,17 @@ $buttonStart.Add_Click({
             Write-Host "[INFO] Building rsync-alpine image..." -ForegroundColor Cyan
 
             # Use inline Dockerfile approach for reliable cross-platform building
-            if ($CONTAINER_LOCATION -eq "LOCAL") {
-                Write-Host "[INFO] Creating rsync image inline for local Docker..." -ForegroundColor Cyan
-                $InlineDockerfile = @"
+            $InlineDockerfile = @"
 FROM alpine:latest
 RUN apk add --no-cache rsync
 "@
+
+            if ($CONTAINER_LOCATION -eq "LOCAL") {
+                Write-Host "[INFO] Creating rsync image inline for local Docker..." -ForegroundColor Cyan
                 $InlineDockerfile | & docker build -t $rsyncImage -
             } else {
                 Write-Host "[INFO] Creating rsync image inline for remote Docker..." -ForegroundColor Cyan
                 Set-DockerSSHEnvironment
-                $InlineDockerfile = @"
-FROM alpine:latest
-RUN apk add --no-cache rsync
-"@
                 $InlineDockerfile | & docker --context $script:RemoteContextName build -t $rsyncImage -
             }
         } else {
@@ -6597,8 +6624,8 @@ RUN apk add --no-cache rsync
             Write-Host ""
             
             # Configure SSH key paths for Linux (remote host)
-            $sshKeyPath = "/home/php-workstation/.ssh/id_ed25519_${USERNAME}"
-            $knownHostsPath = "/home/php-workstation/.ssh/known_hosts"
+            $sshKeyPath = "/home/$($script:RemoteUser)/.ssh/id_ed25519_${USERNAME}"
+            $knownHostsPath = "/home/$($script:RemoteUser)/.ssh/known_hosts"
             
             $dockerArgs = @(
                 "run", "-d", "--rm",     
