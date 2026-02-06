@@ -3614,6 +3614,102 @@ function Set-DockerSSHEnvironment {
     }
 }
 
+# Helper: path for remote container metadata
+function Get-RemoteContainerMetadataPath {
+    param([string]$ContainerName)
+    return "/tmp/impactncd/${ContainerName}.json"
+}
+
+# Helper: write remote container metadata (password, port, volumes)
+function Write-RemoteContainerMetadata {
+    param(
+        [string]$ContainerName,
+        [string]$Password,
+        [string]$Port,
+        [bool]$UseVolumes,
+        [string]$Repo,
+        [string]$User
+    )
+    try {
+        Set-DockerSSHEnvironment
+        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $sshKeyPath = "${HOME}\.ssh\id_ed25519_${User}"
+        $metaPath = Get-RemoteContainerMetadataPath -ContainerName $ContainerName
+        $meta = [ordered]@{
+            container = $ContainerName
+            repo = $Repo
+            user = $User
+            password = $Password
+            port = $Port
+            useVolumes = $UseVolumes
+            timestamp = (Get-Date).ToString("s")
+        } | ConvertTo-Json -Compress
+        $metaBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($meta))
+        $cmd = "mkdir -p /tmp/impactncd && umask 177 && echo $metaBase64 | base64 -d > '$metaPath'"
+        & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $cmd 2>$null
+    } catch {
+        Write-Debug-Message "[DEBUG] Failed to write remote metadata: $($_.Exception.Message)"
+    }
+}
+
+# Helper: read remote container metadata if present
+function Read-RemoteContainerMetadata {
+    param([string]$ContainerName, [string]$User)
+    try {
+        Set-DockerSSHEnvironment
+        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $sshKeyPath = "${HOME}\.ssh\id_ed25519_${User}"
+        $metaPath = Get-RemoteContainerMetadataPath -ContainerName $ContainerName
+        $cmd = "cat '$metaPath' 2>/dev/null"
+        $json = & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $cmd 2>$null
+        if (-not $json) { return $null }
+        return $json | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-Debug-Message "[DEBUG] Failed to read remote metadata: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+# Helper: remove remote container metadata
+function Remove-RemoteContainerMetadata {
+    param([string]$ContainerName, [string]$User)
+    try {
+        Set-DockerSSHEnvironment
+        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+        $sshKeyPath = "${HOME}\.ssh\id_ed25519_${User}"
+        $metaPath = Get-RemoteContainerMetadataPath -ContainerName $ContainerName
+        $cmd = "rm -f '$metaPath'"
+        & ssh -o ConnectTimeout=10 -o BatchMode=yes -o PasswordAuthentication=no -o PubkeyAuthentication=yes -o IdentitiesOnly=yes -i $sshKeyPath $remoteHost $cmd 2>$null
+    } catch {
+        Write-Debug-Message "[DEBUG] Failed to remove remote metadata: $($_.Exception.Message)"
+    }
+}
+
+# Helper: get container runtime info (env/password, host port) as fallback
+function Get-ContainerRuntimeInfo {
+    param([string]$ContainerName)
+    $info = @{ Password = $null; Port = $null }
+    try {
+        if ($CONTAINER_LOCATION -eq "LOCAL") {
+            $envLines = & docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $ContainerName 2>$null
+            $portLine = & docker inspect -f '{{range $p, $c := .NetworkSettings.Ports}}{{if eq $p "8787/tcp"}}{{range $c}}{{println .HostPort}}{{end}}{{end}}{{end}}' $ContainerName 2>$null
+        } else {
+            Set-DockerSSHEnvironment
+            $envLines = & docker --context $script:RemoteContextName inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $ContainerName 2>$null
+            $portLine = & docker --context $script:RemoteContextName inspect -f '{{range $p, $c := .NetworkSettings.Ports}}{{if eq $p "8787/tcp"}}{{range $c}}{{println .HostPort}}{{end}}{{end}}{{end}}' $ContainerName 2>$null
+        }
+        if ($envLines) {
+            foreach ($line in ($envLines -split "`n")) {
+                if ($line -like "PASSWORD=*") { $info.Password = $line.Substring(9) }
+            }
+        }
+        if ($portLine) { $info.Port = $portLine.Trim() }
+    } catch {
+        Write-Debug-Message "[DEBUG] Failed to inspect container runtime info: $($_.Exception.Message)"
+    }
+    return $info
+}
+
 # 0.5: Helper function to verify SSH key files exist on remote system for Docker mounting
 function Test-RemoteSSHKeyFiles {
     param(
@@ -4115,9 +4211,12 @@ function Get-GitRepositoryState {
 
 # 5: Helper function to check for git changes and prompt for commit
 function Invoke-GitChangeDetection {
-    param([string]$RepoPath)
+    param(
+        [string]$RepoPath,
+        [switch]$PullCurrentState
+    )
     
-    Write-Debug-Message "[DEBUG] Starting git change detection for '$RepoPath' (Location: $CONTAINER_LOCATION)"
+    Write-Debug-Message "[DEBUG] Starting git change detection for '$RepoPath' (Location: $CONTAINER_LOCATION, PullCurrentState: $PullCurrentState)"
     Write-Host "[INFO] Checking for git changes after container execution..." -ForegroundColor Cyan
     
     if (-not $script:GitStateBeforeContainer) {
@@ -4126,7 +4225,11 @@ function Invoke-GitChangeDetection {
         return
     }
     
-    $currentState = Get-GitRepositoryState -RepoPath $RepoPath -Pull
+    $currentState = if ($PullCurrentState) {
+        Get-GitRepositoryState -RepoPath $RepoPath -Pull
+    } else {
+        Get-GitRepositoryState -RepoPath $RepoPath
+    }
     if (-not $currentState) {
         Write-Host "[INFO] Could not get current git state - skipping change detection" -ForegroundColor Cyan
         Write-Debug-Message "[DEBUG] Git change detection skipped: unable to retrieve current state"
@@ -4973,6 +5076,10 @@ Write-Host ""
 
 # Check if the specific container is currently running
 $isContainerRunning = $false
+$script:IsRecoveredSession = $false
+$recoveredMetadata = $null
+$recoveredPortOverride = $null
+$recoveredUseVolumes = $null
 try {
     # Ensure SSH environment is set for remote Docker operations
     Set-DockerSSHEnvironment
@@ -4987,7 +5094,32 @@ try {
     }
     if ($LASTEXITCODE -eq 0 -and $runningCheck.Trim() -eq $CONTAINER_NAME) {
         $isContainerRunning = $true
+        $script:IsRecoveredSession = $true
         Write-Host "[INFO] Container '$CONTAINER_NAME' is currently RUNNING" -ForegroundColor Cyan
+        if (-not $script:GitRepoPath) {
+            if ($CONTAINER_LOCATION -eq "LOCAL" -and $script:LocalRepoPath) {
+                $script:GitRepoPath = $script:LocalRepoPath
+            } elseif ($CONTAINER_LOCATION -like "REMOTE@*" -and $script:RemoteRepoPath) {
+                $script:GitRepoPath = $script:RemoteRepoPath
+            }
+        }
+        if (-not $script:GitStateBeforeContainer -and $script:GitRepoPath) {
+            # For recovered sessions, capture baseline without pulling; pull happens on stop
+            $script:GitStateBeforeContainer = Get-GitRepositoryState -RepoPath $script:GitRepoPath
+        }
+        if ($CONTAINER_LOCATION -ne "LOCAL") {
+            $recoveredMetadata = Read-RemoteContainerMetadata -ContainerName $CONTAINER_NAME -User $USERNAME
+            if ($recoveredMetadata) {
+                Write-Host "[INFO] Recovered metadata for running container" -ForegroundColor Cyan
+                if ($recoveredMetadata.password) { $PASSWORD = $recoveredMetadata.password }
+                if ($recoveredMetadata.port) { $recoveredPortOverride = $recoveredMetadata.port }
+                if ($null -ne $recoveredMetadata.useVolumes) { $recoveredUseVolumes = [bool]$recoveredMetadata.useVolumes }
+            } else {
+                $runtimeInfo = Get-ContainerRuntimeInfo -ContainerName $CONTAINER_NAME
+                if ($runtimeInfo.Password) { $PASSWORD = $runtimeInfo.Password }
+                if ($runtimeInfo.Port) { $recoveredPortOverride = $runtimeInfo.Port }
+            }
+        }
     } else {
         Write-Host "[INFO] Container '$CONTAINER_NAME' is currently STOPPED or does not exist" -ForegroundColor Cyan
     }
@@ -5096,6 +5228,11 @@ $checkBoxVolumes = New-Object System.Windows.Forms.CheckBox -Property @{
 }
 $formContainer.Controls.Add($checkBoxVolumes)
 
+if ($null -ne $recoveredUseVolumes) {
+    $checkBoxVolumes.Checked = $recoveredUseVolumes
+    $script:UseVolumes = $recoveredUseVolumes
+}
+
 # Rebuild image checkbox option
 $checkBoxRebuild = New-Object System.Windows.Forms.CheckBox -Property @{
     Text = 'Rebuild Docker image for repository'
@@ -5127,6 +5264,10 @@ $textBoxPort = New-Object System.Windows.Forms.TextBox -Property @{
     Text = '8787'
 }
 $formContainer.Controls.Add($textBoxPort)
+
+if ($recoveredPortOverride) {
+    $textBoxPort.Text = $recoveredPortOverride
+}
 
 # Custom parameters label and textbox
 $labelParams = New-Object System.Windows.Forms.Label -Property @{ 
@@ -5312,6 +5453,12 @@ $buttonStart.Add_Click({
     Write-Host ""
     Write-Host "[INFO] Container is starting up..." -ForegroundColor Cyan
     Write-Host "  Container: $CONTAINER_NAME"
+    if ($CONTAINER_LOCATION -ne "LOCAL") {
+        $remoteHost = "php-workstation@$($script:RemoteHostIp)"
+    }
+
+    # New container start is not a recovered session
+    $script:IsRecoveredSession = $false
     
     # Get options from form and store in script scope
     $script:UseVolumes = $checkBoxVolumes.Checked
@@ -6362,6 +6509,11 @@ RUN apk add --no-cache rsync
                 $buttonStart.Enabled = $false
                 $buttonStop.Enabled = $true
                 Update-InstructionText -Status "RUNNING" -Location $CONTAINER_LOCATION -VolumesInfo "Enabled"
+
+                if ($CONTAINER_LOCATION -ne "LOCAL") {
+                    $portToStore = $(if($portOverride) { $portOverride } else { '8787' })
+                    Write-RemoteContainerMetadata -ContainerName $CONTAINER_NAME -Password $PASSWORD -Port $portToStore -UseVolumes $useVolumes -Repo $script:SelectedRepo -User $USERNAME
+                }
                 
             } else {
                 Write-Host "[WARNING] Container may have exited. Checking logs..." -ForegroundColor Yellow
@@ -6551,6 +6703,11 @@ RUN apk add --no-cache rsync
                 $buttonStart.Enabled = $false
                 $buttonStop.Enabled = $true
                 Update-InstructionText -Status "RUNNING" -Location $CONTAINER_LOCATION -VolumesInfo "Disabled"
+
+                if ($CONTAINER_LOCATION -ne "LOCAL") {
+                    $portToStore = $(if($portOverride) { $portOverride } else { '8787' })
+                    Write-RemoteContainerMetadata -ContainerName $CONTAINER_NAME -Password $PASSWORD -Port $portToStore -UseVolumes:$false -Repo $script:SelectedRepo -User $USERNAME
+                }
                 
             } else {
                 Write-Host ""
@@ -6674,6 +6831,9 @@ $buttonStop.Add_Click({
                     }    
 
                     # Update UI state - container stopped successfully
+                    if ($CONTAINER_LOCATION -ne "LOCAL") {
+                        Remove-RemoteContainerMetadata -ContainerName $CONTAINER_NAME -User $USERNAME
+                    }
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
                     Update-InstructionText -Status "STOPPED" -Location $CONTAINER_LOCATION -VolumesInfo $(if($script:UseVolumes) { "Enabled" } else { "Disabled" })
@@ -6693,8 +6853,10 @@ $buttonStop.Add_Click({
                     
                     # Check for git changes after container stops
                     if ($script:GitRepoPath) {
-                        Invoke-GitChangeDetection -RepoPath $script:GitRepoPath
+                        $pullForStop = $script:IsRecoveredSession
+                        Invoke-GitChangeDetection -RepoPath $script:GitRepoPath -PullCurrentState:$pullForStop
                     }
+                    $script:IsRecoveredSession = $false
                     
                 } else {
                     Write-Host ""
@@ -6737,14 +6899,19 @@ $buttonStop.Add_Click({
                     }
                     
                     # Update UI state
+                    if ($CONTAINER_LOCATION -ne "LOCAL") {
+                        Remove-RemoteContainerMetadata -ContainerName $CONTAINER_NAME -User $USERNAME
+                    }
                     $buttonStart.Enabled = $true
                     $buttonStop.Enabled = $false
                     $labelInstruction.Text = "Container: $CONTAINER_NAME`n`nRepository: $($script:SelectedRepo)`nUser: $USERNAME`n`nStatus: STOPPED`nLocation: $CONTAINER_LOCATION`nVolumes: $(if($script:UseVolumes) { 'Enabled' } else { 'Disabled' })"
                     
                     # Check for git changes after force stop
                     if ($script:GitRepoPath) {
-                        Invoke-GitChangeDetection -RepoPath $script:GitRepoPath
+                        $pullForStop = $script:IsRecoveredSession
+                        Invoke-GitChangeDetection -RepoPath $script:GitRepoPath -PullCurrentState:$pullForStop
                     }
+                    $script:IsRecoveredSession = $false
                 } else {
                     Write-Host ""
                     Write-Host "[ERROR] Failed to force stop container '$CONTAINER_NAME'" -ForegroundColor Red
@@ -6775,12 +6942,6 @@ $buttonStop.Add_Click({
     }
 })
 
-<#
-Logic to ensure changes inside the container are pushed to github and pulled to the local machine
-#>
-
-
-
 $buttonOK.Add_Click({
     Write-Host ""
     Write-Host "[INFO] Container management dialog closed" -ForegroundColor Cyan
@@ -6796,27 +6957,4 @@ Write-Host ""
 Write-Host "Container management interface closed."
 Write-Host ""
 
-
-
-<#
-Logic:
-    8. If the user closes the script while the container is running we prompt them to stop the container first
-#>
-
-#------------------------------------------------#
-#   STEP 6: PROMPT AND LOGIC FOR GITHUB PROMPT   #
-#------------------------------------------------#
-
-<# 
-Logic:
-    1. After the user has stopped the container, all file changes are synced back to the local/remote repository folder
-    2. We check whether there are any changes in the repository folder (git status)
-    3. If yes, we prompt the user whether they want to commit and push the changes to GitHub
-    4. If yes, we prompt for a commit message and do the commit and push
-    5. If no, we exit the script
-    6. If no changes, we exit the script
-#>
-
-
-
-
+# --- End of script --- #
