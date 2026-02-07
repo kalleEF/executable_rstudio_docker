@@ -14,6 +14,55 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:GlobalDebugFlag = $false
 $script:ThemePalette = $null
+$script:LogFile = $null
+$script:LogInit = $false
+
+function Initialize-Logging {
+    if ($script:LogInit) { return }
+    $script:LogInit = $true
+
+    $disable = $env:IMPACT_LOG_DISABLE
+    if ($disable -and $disable -match '^(1|true|yes)$') { return }
+
+    $logPath = if ($env:IMPACT_LOG_FILE) { $env:IMPACT_LOG_FILE } else { Join-Path $HOME '.impact_gui/logs/impact.log' }
+    try {
+        $logDir = Split-Path -Parent $logPath
+        if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+        if (Test-Path $logPath) {
+            $info = Get-Item $logPath -ErrorAction SilentlyContinue
+            if ($info -and $info.Length -gt 512KB) {
+                Move-Item -Force -Path $logPath -Destination "$logPath.1" -ErrorAction SilentlyContinue
+            }
+        }
+        $script:LogFile = $logPath
+        $header = "[{0}] [INFO] log start (pid={1})" -f (Get-Date -Format 's'), $PID
+        Add-Content -Path $logPath -Value $header -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch { }
+}
+
+function Get-BuildInfo {
+    $version = '2.0.0'
+    $built = (Get-Date).ToString('s')
+    $commit = $null
+    $dirty = $false
+
+    try {
+        $git = Get-Command git -ErrorAction SilentlyContinue
+        if ($git) {
+            $scriptDir = Split-Path -Parent $PSCommandPath
+            if ($scriptDir) { Push-Location $scriptDir }
+            try {
+                $commit = git rev-parse --short HEAD 2>$null
+                $status = git status --porcelain 2>$null
+                if ($status) { $dirty = $true }
+            } catch { }
+            if ($scriptDir) { Pop-Location }
+        }
+    } catch { $commit = $null }
+
+    $commitTag = if ($commit) { $commit + $(if($dirty){'*'}) } else { 'unknown' }
+    return [pscustomobject]@{ Version=$version; Built=$built; Commit=$commitTag }
+}
 
 # Global/session state container; pass this object between steps.
 function New-SessionState {
@@ -62,6 +111,7 @@ function Write-Log {
         [string]$Message,
         [ValidateSet('Info','Warn','Error','Debug')][string]$Level = 'Info'
     )
+    Initialize-Logging
     if ($Level -ne 'Debug' -or $script:GlobalDebugFlag) {
         switch ($Level) {
             'Info'  { Write-Host "[INFO]  $Message" -ForegroundColor Cyan }
@@ -69,6 +119,13 @@ function Write-Log {
             'Error' { Write-Host "[ERROR] $Message" -ForegroundColor Red }
             'Debug' { Write-Host "[DEBUG] $Message" -ForegroundColor DarkGray }
         }
+    }
+
+    if ($script:LogFile) {
+        try {
+            $stamp = Get-Date -Format 's'
+            Add-Content -Path $script:LogFile -Value "[$stamp] [$Level] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue
+        } catch { }
     }
 }
 
@@ -688,6 +745,35 @@ function Style-InfoBox {
     $Box.ReadOnly = $true
 }
 
+function Test-StartupPrerequisites {
+    param([pscustomobject]$State)
+
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCmd) {
+        Write-Log 'Docker CLI not found. Install Docker Desktop or ensure docker is on PATH.' 'Error'
+        [System.Windows.Forms.MessageBox]::Show('Docker CLI not found. Install Docker Desktop and ensure "docker" is on PATH, then retry.','Docker missing','OK','Error') | Out-Null
+        return $false
+    }
+
+    $dockerVersion = $null
+    try { $dockerVersion = (& docker version --format '{{.Server.Version}}' 2>$null) } catch { $dockerVersion = $null }
+    if (-not $dockerVersion) {
+        Write-Log 'Docker daemon is not reachable. Start Docker Desktop and retry.' 'Error'
+        [System.Windows.Forms.MessageBox]::Show('Docker daemon is not reachable. Start Docker Desktop and retry.','Docker not running','OK','Error') | Out-Null
+        return $false
+    }
+
+    $sshCmd = Get-Command ssh -ErrorAction SilentlyContinue
+    if (-not $sshCmd) {
+        Write-Log 'OpenSSH client not found on PATH.' 'Error'
+        [System.Windows.Forms.MessageBox]::Show('OpenSSH client (ssh) not found on PATH. Install the OpenSSH client feature and retry.','SSH missing','OK','Error') | Out-Null
+        return $false
+    }
+
+    Write-Log "Prereq check passed (Docker=$dockerVersion, ssh present)." 'Info'
+    return $true
+}
+
 # 0. Environment prep (PowerShell version, elevation, colors, WinForms load)
 function Ensure-Prerequisites {
     param([pscustomobject]$State)
@@ -700,6 +786,8 @@ function Ensure-Prerequisites {
     [System.Windows.Forms.Application]::EnableVisualStyles()
 
     Write-Log "Detected PowerShell $($PSVersionTable.PSVersion) (Major=$($PSVersionTable.PSVersion.Major))" 'Debug'
+
+    if (-not (Test-StartupPrerequisites -State $State)) { return }
 
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')
     Write-Log "Administrative privileges: $isAdmin" 'Debug'
@@ -1823,6 +1911,12 @@ function Show-ContainerManager {
     $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
     $form.Controls.Add($lblStatus)
 
+    $buildInfo = $State.Metadata.BuildInfo
+    $footerText = if ($buildInfo) { "Build: $($buildInfo.Version) | Commit: $($buildInfo.Commit) | Built: $($buildInfo.Built)" } else { 'Build: unknown' }
+    $lblFooter = New-Object System.Windows.Forms.Label -Property @{ Text=$footerText; Location=New-Object System.Drawing.Point(20,440); Size=New-Object System.Drawing.Size(460,22) }
+    Style-Label -Label $lblFooter -Muted:$true
+    $form.Controls.Add($lblFooter)
+
     $btnClose = New-Object System.Windows.Forms.Button -Property @{ Text='Close'; Location=New-Object System.Drawing.Point(414,374); Size=New-Object System.Drawing.Size(90,34) }
     Style-Button -Button $btnClose -Variant 'secondary'
     $form.Controls.Add($btnClose)
@@ -2218,6 +2312,10 @@ function Invoke-ImpactGui {
     Write-Log 'Starting IMPACT Docker GUI workflow.' 'Info'
     Ensure-PowerShell7 -PS7RequestedFlag:$PS7Requested.IsPresent
     $state = New-SessionState
+
+    $state.Metadata.BuildInfo = Get-BuildInfo
+    $bi = $state.Metadata.BuildInfo
+    Write-Log ("Build info -> Version={0} Commit={1} Built={2}" -f $bi.Version, $bi.Commit, $bi.Built) 'Info'
 
     Ensure-Prerequisites -State $state
     if (-not (Show-CredentialDialog -State $state)) { return }
